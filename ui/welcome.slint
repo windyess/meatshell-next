@@ -57,6 +57,13 @@ component SessionRow inherits Rectangle {
     property <length> grab-y;
 
     height: root.compact ? 44px : 36px;
+    Rectangle {
+        y: parent.height - 1px;
+        height: 1px;
+        width: parent.width;
+        z: 1;
+        background: Theme.row-rule;
+    }
 
     // Remember where the right-click landed so the popup can appear there.
     property <length> ctx-x;
@@ -667,12 +674,18 @@ export component Welcome inherits Rectangle {
                         // Exclude hidden rows from layout spacing while a group
                         // is collapsed; keep its first row for the group header.
                         visible: session.group-header != "" || !session.collapsed;
-                        padding-top: self.visible && i > 0 ? 2px : 0px;
-                        spacing: 2px;
+                        padding-top: 0px;
+                        spacing: 0px;
                         // Group header on the first row of each group (#41).
                         // Click anywhere on it to collapse / expand the group.
                         if session.group-header != "" : Rectangle {
                             height: 26px;
+                            Rectangle {
+                                y: parent.height - 1px;
+                                height: 1px;
+                                width: parent.width;
+                                background: Theme.row-rule;
+                            }
                             // Right-click popup anchor.
                             property <length> gmx;
                             property <length> gmy;

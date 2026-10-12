@@ -173,6 +173,41 @@ pub(super) fn collect_sftp_selected(
     paths
 }
 
+/// Explorer-style list selection: click / Ctrl+click / Shift+click.
+pub(super) fn apply_list_selection(
+    selected: &mut [bool],
+    idx: usize,
+    anchor: i32,
+    ctrl: bool,
+    shift: bool,
+) {
+    let n = selected.len();
+    if idx >= n {
+        return;
+    }
+    let range = shift && anchor >= 0 && (anchor as usize) < n;
+    if range {
+        let a = anchor as usize;
+        let lo = a.min(idx);
+        let hi = a.max(idx);
+        for (i, on) in selected.iter_mut().enumerate() {
+            if i >= lo && i <= hi {
+                *on = true;
+            } else if !ctrl {
+                *on = false;
+            }
+        }
+        return;
+    }
+    if ctrl {
+        selected[idx] = !selected[idx];
+        return;
+    }
+    for (i, on) in selected.iter_mut().enumerate() {
+        *on = i == idx;
+    }
+}
+
 /// Uncheck every SFTP entry for a tab and reset its selected-count (#100).
 pub(super) fn clear_sftp_selection(terminals: &VecModel<TerminalState>, tab_id: &str) {
     for ti in 0..terminals.row_count() {
@@ -304,7 +339,7 @@ pub(super) fn build_remote_zip_command(sources: &[String], dest_dir: &str) -> Op
     let base_q = posix_shell_quote(names[0]);
     let mut cmd = format!(
         "cd -- {dest_q} && n=1 && base={base_q} && out=\"$base.zip\" && \
-while [ -e \"$out\" ]; do n=$((n+1)); out=\"$base-$n.zip\"; done && zip -rq -- \"$out\""
+while [ -e \"$out\" ]; do n=$((n+1)); out=\"$base-$n.zip\"; done && zip -rq \"$out\""
     );
     for name in names {
         cmd.push(' ');
@@ -316,6 +351,36 @@ while [ -e \"$out\" ]; do n=$((n+1)); out=\"$base-$n.zip\"; done && zip -rq -- \
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn click_selects_only_that_row() {
+        let mut s = vec![true, false, true];
+        apply_list_selection(&mut s, 1, 0, false, false);
+        assert_eq!(s, vec![false, true, false]);
+    }
+
+    #[test]
+    fn ctrl_click_toggles() {
+        let mut s = vec![true, false, false];
+        apply_list_selection(&mut s, 1, 0, true, false);
+        assert_eq!(s, vec![true, true, false]);
+        apply_list_selection(&mut s, 0, 1, true, false);
+        assert_eq!(s, vec![false, true, false]);
+    }
+
+    #[test]
+    fn shift_click_selects_range_from_anchor() {
+        let mut s = vec![false; 5];
+        apply_list_selection(&mut s, 3, 1, false, true);
+        assert_eq!(s, vec![false, true, true, true, false]);
+    }
+
+    #[test]
+    fn ctrl_shift_adds_range() {
+        let mut s = vec![true, false, false, false, true];
+        apply_list_selection(&mut s, 2, 1, true, true);
+        assert_eq!(s, vec![true, true, true, false, true]);
+    }
 
     #[test]
     fn quotes_spaces_and_quotes() {
@@ -373,7 +438,7 @@ mod tests {
         assert_eq!(
             cmd,
             "cd -- '/data/tools' && n=1 && base='logool' && out=\"$base.zip\" && \
-while [ -e \"$out\" ]; do n=$((n+1)); out=\"$base-$n.zip\"; done && zip -rq -- \"$out\" 'logool' 'fw-all.sh'"
+while [ -e \"$out\" ]; do n=$((n+1)); out=\"$base-$n.zip\"; done && zip -rq \"$out\" 'logool' 'fw-all.sh'"
         );
     }
 
@@ -384,7 +449,7 @@ while [ -e \"$out\" ]; do n=$((n+1)); out=\"$base-$n.zip\"; done && zip -rq -- \
             "/data/tools",
         )
         .unwrap();
-        assert!(cmd.ends_with(" zip -rq -- \"$out\" 'b'"));
+        assert!(cmd.ends_with(" zip -rq \"$out\" 'b'"));
         assert!(!cmd.contains("/opt/a"));
     }
 

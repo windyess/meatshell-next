@@ -2,17 +2,24 @@
 # (thin LTO, one codegen unit) from CI / scripts/release.
 
 [alias]
-# Opt-level 3, no LTO — much quicker than --release, close enough for daily use.
-run-fast = "run --profile release-fast"
-build-fast = "build --profile release-fast"
+# Fastest compile: debug profile, skip crates.io. This crate is one huge binary —
+# opt-level 3 (old run-fast) re-optimizes ALL of Slint UI on every .rs change.
+run-fast = "run --offline"
+build-fast = "build --offline"
+# Runtime closer to --release; compile is much slower. Use before profiling.
+run-opt = "run --profile release-fast --offline"
+build-opt = "build --profile release-fast --offline"
 
 # rust-lld ships with rustc. On Windows MSVC this avoids the slow link.exe
 # incremental pass; on Linux it is a no-op if the toolchain already defaults to lld.
 [target.x86_64-pc-windows-msvc]
 linker = "rust-lld"
+# Skip PDB; rust-lld rejects /threads:0 (must be a positive integer).
+rustflags = ["-C", "link-arg=/DEBUG:NONE"]
 
 [target.aarch64-pc-windows-msvc]
 linker = "rust-lld"
+rustflags = ["-C", "link-arg=/DEBUG:NONE"]
 
 [target.x86_64-unknown-linux-gnu]
 rustflags = ["-C", "link-arg=-fuse-ld=lld"]

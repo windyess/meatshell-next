@@ -396,9 +396,16 @@ component DiskBlock inherits Rectangle {
             viewport-height: max(self.height, disk-col.preferred-height);
             disk-col := VerticalLayout {
                 alignment: start;
-                spacing: 1px;
+                spacing: 0px;
                 for d[i] in root.disks : Rectangle {
-                    height: 20px; border-radius: 2px; clip: true;
+                    height: 20px; clip: true;
+                    if i < root.disks.length - 1 : Rectangle {
+                        y: parent.height - 1px;
+                        height: 1px;
+                        width: parent.width;
+                        z: 2;
+                        background: Theme.row-rule;
+                    }
                     ta := TouchArea {
                         changed has-hover => {
                             if (self.has-hover) {

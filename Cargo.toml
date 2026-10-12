@@ -214,17 +214,20 @@ codegen-units = 1
 strip = "symbols"
 panic = "abort"
 
-# Daily `cargo run`: skip LTO / single-CGU. Runtime is close to --release.
+# Optional: closer to --release at runtime. Compile is slow on this crate.
 [profile.release-fast]
 inherits = "release"
 lto = false
-codegen-units = 16
+codegen-units = 256
 strip = false
 incremental = true
 
 [profile.dev]
 opt-level = 0
-debug = "line-tables-only"
+# Windows link of this Slint binary dominates `cargo run` (the 748/749 step).
+# Skip debuginfo so rust-lld is not writing a multi-hundred-MB PDB.
+debug = false
+strip = "debuginfo"
 incremental = true
 
 # Dependencies stay optimized for SSH/terminal speed, but without debug info so

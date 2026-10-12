@@ -140,6 +140,7 @@ export component SftpPanel inherits Rectangle {
     property <bool> fit-group: root.fit-owner && (!root.show-group || root.extras-w - root.used-5 >= root.cost-group);
     property <bool> show-group-col: root.show-group && root.fit-group;
     property <int> selected-row: -1;       // clicked/highlighted file-list row (#70)
+    property <int> select-anchor: -1;      // Shift+click range start
     in property <int> selected-count;      // number of checked entries (#100)
     in property <int> clipboard-count;     // staged remote copy paths (cp/paste)
     // Panel-level right-click context menu (#84). One menu for the whole list:
@@ -181,6 +182,7 @@ export component SftpPanel inherits Rectangle {
     callback tree-expand(string);   // toggle expand/collapse + navigate
     callback delete(string);        // remove a remote file/dir
     callback toggle-select(int);    // toggle a row's multi-select checkbox (#100)
+    callback row-select(int /* idx */, int /* anchor */, bool /* ctrl */, bool /* shift */);
     callback download-selected();   // download all checked entries (#100)
     callback delete-selected();     // delete all checked entries (#100)
     callback copy-to-target(string /* path */, string /* target tab */);
@@ -220,6 +222,7 @@ export component SftpPanel inherits Rectangle {
         path-input.text = root.current-path;
         compact-path-input.text = root.current-path;
         root.selected-row = -1;
+        root.select-anchor = -1;
     }
 
     // Drag empty space to re-dock; interactive widgets (file list, tree, toolbar
@@ -682,8 +685,15 @@ export component SftpPanel inherits Rectangle {
                             background: node-ta.has-hover
                                 ? Theme.bg-hover
                                 : (node.path == root.current-path
-                                    ? #4a90e230
-                                    : (mod(i, 2) == 0 ? transparent : #ffffff08));
+                                    ? Theme.accent.with-alpha(0.16)
+                                    : transparent);
+
+                            if i < root.tree-nodes.length - 1 : Rectangle {
+                                y: parent.height - 1px;
+                                height: 1px;
+                                width: parent.width;
+                                background: Theme.row-rule;
+                            }
 
                             node-ta := TouchArea {
                                 mouse-cursor: pointer;
@@ -951,12 +961,17 @@ export component SftpPanel inherits Rectangle {
                             for entry[i] in root.entries : row := Rectangle {
                                 height: 24px;
                                 background: entry.selected
-                                    ? #4a90e235
+                                    ? Theme.accent.with-alpha(0.22)
                                     : (i == root.selected-row
-                                        ? #4a90e240
-                                        : (row-ta.has-hover
-                                            ? #4a90e225
-                                            : (mod(i, 2) == 0 ? transparent : #ffffff08)));
+                                        ? Theme.accent.with-alpha(0.16)
+                                        : (row-ta.has-hover ? Theme.bg-hover : transparent));
+
+                                if i < root.entries.length - 1 : Rectangle {
+                                    y: parent.height - 1px;
+                                    height: 1px;
+                                    width: parent.width;
+                                    background: Theme.row-rule;
+                                }
 
                                 row-ta := TouchArea {
                                     mouse-cursor: pointer;
@@ -970,8 +985,20 @@ export component SftpPanel inherits Rectangle {
                                     }
                                     pointer-event(ev) => {
                                         if (ev.kind == PointerEventKind.down
+                                                && ev.button == PointerEventButton.left) {
+                                            root.row-select(i, root.select-anchor, ev.modifiers.control, ev.modifiers.shift);
+                                            if (!ev.modifiers.shift) {
+                                                root.select-anchor = i;
+                                            }
+                                            root.selected-row = i;
+                                        }
+                                        if (ev.kind == PointerEventKind.down
                                                 && ev.button == PointerEventButton.right) {
                                             root.selected-row = i;
+                                            if (!entry.selected) {
+                                                root.row-select(i, i, false, false);
+                                                root.select-anchor = i;
+                                            }
                                             root.menu-target = entry.full-path;
                                             root.menu-target-name = entry.name;
                                             root.menu-target-is-dir = entry.is-dir;

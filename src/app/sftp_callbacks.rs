@@ -381,6 +381,52 @@ pub(super) fn wire_sftp_callbacks(
     // SFTP multi-select: toggle a row's checkbox + recount (#100).
     {
         let weak = window.as_weak();
+        window.on_sftp_row_select(
+            move |tab_id: SharedString, idx: i32, anchor: i32, ctrl: bool, shift: bool| {
+                let Some(w) = weak.upgrade() else { return };
+                let terminals = w.get_terminals();
+                let Some(tm) = terminals.as_any().downcast_ref::<VecModel<TerminalState>>() else {
+                    return;
+                };
+                for ti in 0..tm.row_count() {
+                    let Some(row) = tm.row_data(ti) else { continue };
+                    if row.id.as_str() != tab_id.as_str() {
+                        continue;
+                    }
+                    if let Some(em) = row
+                        .sftp_entries
+                        .as_any()
+                        .downcast_ref::<VecModel<SftpEntry>>()
+                    {
+                        let n = em.row_count();
+                        let mut flags = vec![false; n];
+                        for ei in 0..n {
+                            flags[ei] = em.row_data(ei).map(|e| e.selected).unwrap_or(false);
+                        }
+                        apply_list_selection(&mut flags, idx as usize, anchor, ctrl, shift);
+                        let mut count = 0;
+                        for ei in 0..n {
+                            if let Some(mut e) = em.row_data(ei) {
+                                if e.selected != flags[ei] {
+                                    e.selected = flags[ei];
+                                    em.set_row_data(ei, e);
+                                }
+                                if flags[ei] {
+                                    count += 1;
+                                }
+                            }
+                        }
+                        let mut r = row.clone();
+                        r.sftp_selected_count = count;
+                        tm.set_row_data(ti, r);
+                    }
+                    break;
+                }
+            },
+        );
+    }
+    {
+        let weak = window.as_weak();
         window.on_sftp_toggle_select(move |tab_id: SharedString, idx: i32| {
             let Some(w) = weak.upgrade() else { return };
             let terminals = w.get_terminals();

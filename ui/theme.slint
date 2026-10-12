@@ -77,6 +77,8 @@ export global Theme {
 
     out property <brush> border-subtle: dark ? #3a3d46 : #e2e2e8;
     out property <brush> border-strong: dark ? #4a4e59 : #c7c7cc;
+    // Hairline between list rows: visible but quieter than border-subtle.
+    out property <brush> row-rule: dark ? #ffffff10 : #0000000e;
 
     out property <brush> text-primary:   dark ? #e6e8ee : #1d1d1f;
     // Light-mode secondary/muted darkened further (was #55555a / #7c7c82): over a
