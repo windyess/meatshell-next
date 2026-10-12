@@ -234,6 +234,12 @@ msgstr "Permissions"
 msgid "Copy path"
 msgstr "Copy path"
 
+msgid "Copy file"
+msgstr "Copy file"
+
+msgid "Paste here"
+msgstr "Paste here"
+
 msgid "Copy to session..."
 msgstr "Copy to session..."
 
