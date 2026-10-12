@@ -128,8 +128,12 @@ open /Applications/meatshell.app
 
 ## 运行
 
+日常开发用 debug 或 `release-fast`，不要每次 `--release`（thin LTO + 单 codegen unit，Windows 上经常要十几分钟）：
+
 ```bash
-cargo run --release
+cargo run                      # 最快迭代；依赖已 opt-level=1
+cargo run-fast                 # 接近发版性能，无 LTO（.cargo/config.toml 里的别名）
+cargo build --release          # 仅发版 / 测最终体积时再用
 ```
 
 首次启动会在 `%APPDATA%/meatshell/sessions.json` 建立空的会话库。点击右上

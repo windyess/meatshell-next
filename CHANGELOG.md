@@ -5,6 +5,10 @@ All notable changes are documented here. 本文件记录所有重要变更。
 
 ## Unreleased
 
+- **加快日常编译。** `cargo run` 的依赖不再带完整 debug 信息；新增 `release-fast` 配置（无 LTO）和 `cargo run-fast` 别名。Windows 链接改用自带的 rust-lld。发版仍用原来的 `--release`。
+- **Faster local builds.** Dev-profile dependencies no longer carry full debug info; add a `release-fast` profile (no LTO) and a `cargo run-fast` alias. Windows links with the bundled rust-lld. Shipping still uses `--release`.
+
+
 - **SFTP 右键菜单支持复制 / 粘贴。** 复制会记下远端路径；粘贴向当前 SSH 会话注入 `cp -a -- …` 命令（路径按 POSIX 单引号转义）。同一目录粘贴会写成 `name.copy`，避免 “are the same file”。约 0.8 秒后刷新文件列表。
 - **SFTP context menu Copy / Paste.** Copy stages remote paths; Paste injects `cp -a -- …` into the current SSH session (POSIX-quoted). Pasting into the same directory uses `name.copy` so GNU cp does not fail with “are the same file”. The file list refreshes after about 0.8s.
 

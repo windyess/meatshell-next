@@ -133,8 +133,12 @@ under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). See
 
 ## Running
 
+For daily work use debug or `release-fast`. Avoid `--release` on every change (thin LTO + 1 codegen unit often takes many minutes on Windows):
+
 ```bash
-cargo run --release
+cargo run                      # fastest iteration; deps already opt-level=1
+cargo run-fast                 # near-release speed, no LTO (alias in .cargo/config.toml)
+cargo build --release          # shipping / final-size checks only
 ```
 
 On first launch an empty session store is created at
