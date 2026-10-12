@@ -234,6 +234,12 @@ msgstr "权限"
 msgid "Copy path"
 msgstr "复制路径"
 
+msgid "Copy file"
+msgstr "复制文件"
+
+msgid "Paste here"
+msgstr "粘贴到此目录"
+
 msgid "Copy to session..."
 msgstr "复制到会话..."
 

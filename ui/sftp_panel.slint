@@ -1175,12 +1175,12 @@ export component SftpPanel inherits Rectangle {
                                     clicked => { root.copy-path(root.menu-target); }
                                 }
                                 SftpMenuItem {
-                                    label: @tr("Copy");
+                                    label: @tr("Copy file");
                                     enabled: root.menu-target != "" || root.selected-count > 0;
                                     clicked => { root.copy-files(root.menu-target); }
                                 }
                                 SftpMenuItem {
-                                    label: @tr("Paste");
+                                    label: @tr("Paste here");
                                     enabled: root.clipboard-count > 0;
                                     clicked => { root.paste-files(); }
                                 }
