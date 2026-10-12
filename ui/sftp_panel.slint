@@ -48,7 +48,7 @@ component SftpMenuItem inherits Rectangle {
     in property <brush> tint: Theme.text-primary;
     in property <bool> enabled: true;   // disabled items grey out + ignore clicks
     callback clicked();
-    height: 28px;
+    height: 30px;
     border-radius: Theme.radius-sm;
     background: (root.enabled && ta.has-hover) ? Theme.bg-hover : transparent;
     ta := TouchArea {
@@ -60,7 +60,7 @@ component SftpMenuItem inherits Rectangle {
         text: root.icon;
         color: root.enabled ? root.tint : Theme.text-muted;
         font-family: "Material Icons";
-        font-size: Theme.fs-md;
+        font-size: Theme.fs-lg;
         horizontal-alignment: center;
         vertical-alignment: center;
         width: 18px;
@@ -70,7 +70,7 @@ component SftpMenuItem inherits Rectangle {
         x: 30px;
         text: root.label;
         color: root.enabled ? root.tint : Theme.text-muted;
-        font-size: Theme.fs-md;
+        font-size: Theme.fs-lg;
         vertical-alignment: center;
         height: parent.height;
     }
@@ -393,7 +393,7 @@ export component SftpPanel inherits Rectangle {
                         color: Theme.text-primary;
                         // CJK-capable font so typed Chinese isn't tofu (#54).
                         font-family: Theme.ui-font-family;
-                        font-size: Theme.fs-md;
+                        font-size: Theme.fs-lg;
                         vertical-alignment: center;
                         single-line: true;
                         accepted => { root.navigate(self.text); }
@@ -638,7 +638,7 @@ export component SftpPanel inherits Rectangle {
                             text: root.current-path;
                             color: Theme.text-primary;
                             font-family: Theme.ui-font-family;
-                            font-size: Theme.fs-md;
+                            font-size: Theme.fs-lg;
                             vertical-alignment: center;
                             single-line: true;
                             accepted => { root.navigate(self.text); }
@@ -660,13 +660,13 @@ export component SftpPanel inherits Rectangle {
 
                 // Tree header
                 Rectangle {
-                    height: 22px;
+                    height: 24px;
                     background: Theme.bg-root;
                     Text {
                         x: 8px;
                         text: @tr("Directory tree");
                         color: Theme.text-muted;
-                        font-size: Theme.fs-sm;
+                        font-size: Theme.fs-md;
                         vertical-alignment: center;
                         height: parent.height;
                     }
@@ -681,7 +681,7 @@ export component SftpPanel inherits Rectangle {
                         spacing: 0;
 
                         for node[i] in root.tree-nodes : Rectangle {
-                            height: 26px;
+                            height: 30px;
                             background: node-ta.has-hover
                                 ? Theme.bg-hover
                                 : (node.path == root.current-path
@@ -714,7 +714,7 @@ export component SftpPanel inherits Rectangle {
                                         ? (node.expanded ? "▼" : "▶")
                                         : " ";
                                     color: Theme.text-muted;
-                                    font-size: 11px;
+                                    font-size: 12px;
                                     horizontal-alignment: center;
                                     vertical-alignment: center;
                                 }
@@ -725,7 +725,7 @@ export component SftpPanel inherits Rectangle {
                                     color: node.path == root.current-path
                                         ? Theme.accent
                                         : Theme.text-primary;
-                                    font-size: Theme.fs-md;
+                                    font-size: Theme.fs-lg;
                                     horizontal-stretch: 1;
                                     overflow: elide;
                                     vertical-alignment: center;
@@ -769,7 +769,7 @@ export component SftpPanel inherits Rectangle {
 
                 // Column headers
                 column-header := Rectangle {
-                    height: 22px;
+                    height: 24px;
                     background: Theme.bg-root;
                     HorizontalLayout {
                         padding-left: 8px; padding-right: 8px; spacing: 8px;
@@ -793,7 +793,7 @@ export component SftpPanel inherits Rectangle {
                             Text {
                                 text: @tr("Name") + (root.sort-key == "name" ? (root.sort-dir > 0 ? " ↑" : " ↓") : "");
                                 color: root.sort-key == "name" ? Theme.accent : Theme.text-muted;
-                                font-size: Theme.fs-sm;
+                                font-size: Theme.fs-md;
                                 width: parent.width;
                                 horizontal-alignment: left;
                                 vertical-alignment: center;
@@ -815,7 +815,7 @@ export component SftpPanel inherits Rectangle {
                             Text {
                                 text: @tr("Size") + (root.sort-key == "size" ? (root.sort-dir > 0 ? " ↑" : " ↓") : "");
                                 color: root.sort-key == "size" ? Theme.accent : Theme.text-muted;
-                                font-size: Theme.fs-sm;
+                                font-size: Theme.fs-md;
                                 width: parent.width;
                                 horizontal-alignment: right;
                                 vertical-alignment: center;
@@ -837,7 +837,7 @@ export component SftpPanel inherits Rectangle {
                             Text {
                                 text: @tr("Modified") + (root.sort-key == "modified" ? (root.sort-dir > 0 ? " ↑" : " ↓") : "");
                                 color: root.sort-key == "modified" ? Theme.accent : Theme.text-muted;
-                                font-size: Theme.fs-sm;
+                                font-size: Theme.fs-md;
                                 width: parent.width;
                                 horizontal-alignment: right;
                                 vertical-alignment: center;
@@ -856,7 +856,7 @@ export component SftpPanel inherits Rectangle {
                                     }
                                 }
                             }
-                            Text { text: @tr("Type") + (root.sort-key == "type" ? (root.sort-dir > 0 ? " ↑" : " ↓") : ""); color: root.sort-key == "type" ? Theme.accent : Theme.text-muted; font-size: Theme.fs-sm;
+                            Text { text: @tr("Type") + (root.sort-key == "type" ? (root.sort-dir > 0 ? " ↑" : " ↓") : ""); color: root.sort-key == "type" ? Theme.accent : Theme.text-muted; font-size: Theme.fs-md;
                                    width: parent.width; horizontal-alignment: right; vertical-alignment: center; }
                         }
                         if root.show-permissions-col : Rectangle {
@@ -872,7 +872,7 @@ export component SftpPanel inherits Rectangle {
                                     }
                                 }
                             }
-                            Text { text: @tr("Permissions") + (root.sort-key == "permissions" ? (root.sort-dir > 0 ? " ↑" : " ↓") : ""); color: root.sort-key == "permissions" ? Theme.accent : Theme.text-muted; font-size: Theme.fs-sm;
+                            Text { text: @tr("Permissions") + (root.sort-key == "permissions" ? (root.sort-dir > 0 ? " ↑" : " ↓") : ""); color: root.sort-key == "permissions" ? Theme.accent : Theme.text-muted; font-size: Theme.fs-md;
                                    width: parent.width; horizontal-alignment: right; vertical-alignment: center; }
                         }
                         if root.show-owner-col : Rectangle {
@@ -888,7 +888,7 @@ export component SftpPanel inherits Rectangle {
                                     }
                                 }
                             }
-                            Text { text: @tr("Owner") + (root.sort-key == "owner" ? (root.sort-dir > 0 ? " ↑" : " ↓") : ""); color: root.sort-key == "owner" ? Theme.accent : Theme.text-muted; font-size: Theme.fs-sm;
+                            Text { text: @tr("Owner") + (root.sort-key == "owner" ? (root.sort-dir > 0 ? " ↑" : " ↓") : ""); color: root.sort-key == "owner" ? Theme.accent : Theme.text-muted; font-size: Theme.fs-md;
                                    width: parent.width; horizontal-alignment: right; vertical-alignment: center; }
                         }
                         if root.show-group-col : Rectangle {
@@ -902,7 +902,7 @@ export component SftpPanel inherits Rectangle {
                                     }
                                 }
                             }
-                            Text { text: @tr("Group") + (root.sort-key == "group" ? (root.sort-dir > 0 ? " ↑" : " ↓") : ""); color: root.sort-key == "group" ? Theme.accent : Theme.text-muted; font-size: Theme.fs-sm;
+                            Text { text: @tr("Group") + (root.sort-key == "group" ? (root.sort-dir > 0 ? " ↑" : " ↓") : ""); color: root.sort-key == "group" ? Theme.accent : Theme.text-muted; font-size: Theme.fs-md;
                                    width: parent.width; horizontal-alignment: right; vertical-alignment: center; }
                         }
                     }
@@ -959,7 +959,7 @@ export component SftpPanel inherits Rectangle {
                             }
 
                             for entry[i] in root.entries : row := Rectangle {
-                                height: 28px;
+                                height: 32px;
                                 background: entry.selected
                                     ? Theme.accent.with-alpha(0.22)
                                     : (i == root.selected-row
@@ -1046,13 +1046,13 @@ export component SftpPanel inherits Rectangle {
                                             text: entry.is-dir ? "\u{E2C7}" : "\u{E24D}"; // folder / insert_drive_file
                                             font-family: "Material Icons";
                                             color: entry.is-dir ? Theme.accent : Theme.text-secondary;
-                                            font-size: Theme.fs-md;
+                                            font-size: Theme.fs-lg;
                                             vertical-alignment: center;
                                         }
                                         Text {
                                             text: entry.name;
                                             color: entry.is-dir ? Theme.accent : Theme.text-primary;
-                                            font-size: Theme.fs-md;
+                                            font-size: Theme.fs-lg;
                                             horizontal-stretch: 1;
                                             overflow: elide;
                                             vertical-alignment: center;
@@ -1060,32 +1060,32 @@ export component SftpPanel inherits Rectangle {
                                     }
                                     if root.show-size-col : Text {
                                         text: entry.is-dir ? "" : entry.size;
-                                        color: Theme.text-secondary; font-size: Theme.fs-sm;
+                                        color: Theme.text-secondary; font-size: Theme.fs-md;
                                         width: 72px; horizontal-alignment: right; vertical-alignment: center;
                                     }
                                     if root.show-modified-col : Text {
                                         text: entry.modified;
-                                        color: Theme.text-muted; font-size: Theme.fs-sm;
+                                        color: Theme.text-muted; font-size: Theme.fs-md;
                                          width: 116px; horizontal-alignment: right; vertical-alignment: center;
                                      }
                                     if root.show-type-col : Text {
                                         text: entry.file-type;
-                                        color: Theme.text-secondary; font-size: Theme.fs-sm;
+                                        color: Theme.text-secondary; font-size: Theme.fs-md;
                                         width: 100px; horizontal-alignment: right; vertical-alignment: center;
                                     }
                                     if root.show-permissions-col : Text {
                                         text: entry.permissions;
-                                        color: Theme.text-secondary; font-size: Theme.fs-sm;
+                                        color: Theme.text-secondary; font-size: Theme.fs-md;
                                         width: 104px; horizontal-alignment: right; vertical-alignment: center;
                                     }
                                     if root.show-owner-col : Text {
                                         text: entry.owner;
-                                        color: Theme.text-secondary; font-size: Theme.fs-sm;
+                                        color: Theme.text-secondary; font-size: Theme.fs-md;
                                         width: 84px; horizontal-alignment: right; vertical-alignment: center;
                                     }
                                     if root.show-group-col : Text {
                                         text: entry.group;
-                                        color: Theme.text-secondary; font-size: Theme.fs-sm;
+                                        color: Theme.text-secondary; font-size: Theme.fs-md;
                                         width: 84px; horizontal-alignment: right; vertical-alignment: center;
                                     }
                                 }
@@ -1150,8 +1150,8 @@ export component SftpPanel inherits Rectangle {
                     file-menu := PopupWindow {
                         x: root.menu-x;
                         y: root.menu-y;
-                        width: 160px;
-                        height: 17 * 29px + 8px;
+                        width: 168px;
+                        height: 17 * 31px + 8px;
                         Rectangle {
                             background: Theme.popup-bg;
                             border-radius: Theme.radius-sm;
