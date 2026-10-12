@@ -423,6 +423,7 @@ export component TerminalView inherits Rectangle {
     callback sftp-copy-path(string);
     callback sftp-copy-files(string /* menu-target */);
     callback sftp-paste-files();
+    callback sftp-zip-files(string /* menu-target */);
     in property <int> sftp-clipboard-count;
     callback sftp-new-folder(string);
     callback sftp-new-file(string);
@@ -2301,6 +2302,7 @@ export component TerminalView inherits Rectangle {
             copy-path(path)     => { root.sftp-copy-path(path); }
             copy-files(path)    => { root.sftp-copy-files(path); }
             paste-files()       => { root.sftp-paste-files(); }
+            zip-files(path)     => { root.sftp-zip-files(path); }
             new-folder(dir)     => { root.sftp-new-folder(dir); }
             new-file(dir)       => { root.sftp-new-file(dir); }
         }

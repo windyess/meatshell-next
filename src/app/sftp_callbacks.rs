@@ -730,6 +730,44 @@ pub(super) fn wire_sftp_callbacks(
             });
         });
     }
+    {
+        let handles = handles.clone();
+        let sftp_handles = sftp_handles.clone();
+        let weak = window.as_weak();
+        window.on_sftp_zip_files(move |tab_id: SharedString, menu_target: SharedString| {
+            let Some(w) = weak.upgrade() else { return };
+            let terminals = w.get_terminals();
+            let Some(tm) = terminals.as_any().downcast_ref::<VecModel<TerminalState>>() else {
+                return;
+            };
+            let sources = collect_copy_sources(tm, tab_id.as_str(), menu_target.as_str());
+            if sources.is_empty() {
+                return;
+            }
+            let dest_dir = terminal_sftp_paths(&w)
+                .get(tab_id.as_str())
+                .cloned()
+                .filter(|d| !d.is_empty())
+                .unwrap_or_else(|| "/".to_string());
+            let Some(cmd) = build_remote_zip_command(&sources, &dest_dir) else {
+                return;
+            };
+            let (_history, bytes) = encode_command_bar_input(&cmd);
+            if let Some(handle) = handles.borrow().get(tab_id.as_str()) {
+                handle.send_raw(bytes);
+            }
+            let refresh_path = dest_dir.clone();
+            let tab = tab_id.to_string();
+            let sftp_handles = sftp_handles.clone();
+            slint::Timer::single_shot(std::time::Duration::from_millis(1500), move || {
+                if let Ok(guard) = sftp_handles.lock() {
+                    if let Some(h) = guard.get(&tab) {
+                        h.refresh_dir(refresh_path);
+                    }
+                }
+            });
+        });
+    }
 
     // Visual chmod dialog (#84): decompose the current mode into nine bools on
     // open, recompose on apply (Slint has no bitwise ops).

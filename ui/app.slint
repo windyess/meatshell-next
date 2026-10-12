@@ -1150,6 +1150,7 @@ export component AppWindow inherits Window {
     in-out property <int> sftp-clipboard-count: 0;
     callback sftp-copy-files(string /* tab-id */, string /* menu-target */);
     callback sftp-paste-files(string /* tab-id */);
+    callback sftp-zip-files(string /* tab-id */, string /* menu-target */);
 
     // Visual chmod dialog (#84). Rust decomposes the current mode into nine
     // bools when opening and recomposes on apply (Slint has no bitwise ops).
@@ -2110,6 +2111,7 @@ export component AppWindow inherits Window {
                         sftp-copy-path(path) => { root.sftp-copy-path(path); }
                         sftp-copy-files(path) => { root.sftp-copy-files(term.id, path); }
                         sftp-paste-files() => { root.sftp-paste-files(term.id); }
+                        sftp-zip-files(path) => { root.sftp-zip-files(term.id, path); }
                         sftp-new-folder(dir) => {
                             root.sftp-prompt-kind = "mkdir";
                             root.sftp-prompt-tab = term.id;

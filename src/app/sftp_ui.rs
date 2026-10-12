@@ -285,6 +285,34 @@ pub(super) fn build_remote_copy_command(sources: &[String], dest_dir: &str) -> O
     }
 }
 
+/// Build a remote `zip -rq` that archives files/dirs in the current listing.
+/// Only sources whose parent is `dest_dir` are included (the visible folder).
+/// Existing `name.zip` is renamed to `name-N.zip` so the command does not overwrite.
+pub(super) fn build_remote_zip_command(sources: &[String], dest_dir: &str) -> Option<String> {
+    let dest = dest_dir.trim_end_matches('/');
+    let dest = if dest.is_empty() { "/" } else { dest };
+    let names: Vec<&str> = sources
+        .iter()
+        .filter(|src| !src.is_empty() && parent_path(src) == dest)
+        .map(|src| file_name(src))
+        .filter(|name| *name != "." && *name != "..")
+        .collect();
+    if names.is_empty() {
+        return None;
+    }
+    let dest_q = posix_shell_quote(dest);
+    let base_q = posix_shell_quote(names[0]);
+    let mut cmd = format!(
+        "cd -- {dest_q} && n=1 && base={base_q} && out=\"$base.zip\" && \
+while [ -e \"$out\" ]; do n=$((n+1)); out=\"$base-$n.zip\"; done && zip -rq -- \"$out\""
+    );
+    for name in names {
+        cmd.push(' ');
+        cmd.push_str(&posix_shell_quote(name));
+    }
+    Some(cmd)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -330,5 +358,39 @@ mod tests {
             cmd,
             "cp -a -- '/opt/a' '/data/tools/' && cp -a -- '/data/tools/b' '/data/tools/b.copy'"
         );
+    }
+
+    #[test]
+    fn zips_file_and_directory_in_listing() {
+        let cmd = build_remote_zip_command(
+            &[
+                "/data/tools/logool".into(),
+                "/data/tools/fw-all.sh".into(),
+            ],
+            "/data/tools",
+        )
+        .unwrap();
+        assert_eq!(
+            cmd,
+            "cd -- '/data/tools' && n=1 && base='logool' && out=\"$base.zip\" && \
+while [ -e \"$out\" ]; do n=$((n+1)); out=\"$base-$n.zip\"; done && zip -rq -- \"$out\" 'logool' 'fw-all.sh'"
+        );
+    }
+
+    #[test]
+    fn zip_skips_sources_outside_current_dir() {
+        let cmd = build_remote_zip_command(
+            &["/opt/a".into(), "/data/tools/b".into()],
+            "/data/tools",
+        )
+        .unwrap();
+        assert!(cmd.ends_with(" zip -rq -- \"$out\" 'b'"));
+        assert!(!cmd.contains("/opt/a"));
+    }
+
+    #[test]
+    fn zip_empty_when_no_local_sources() {
+        assert!(build_remote_zip_command(&["/opt/a".into()], "/tmp").is_none());
+        assert!(build_remote_zip_command(&[], "/tmp").is_none());
     }
 }

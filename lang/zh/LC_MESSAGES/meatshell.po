@@ -240,6 +240,9 @@ msgstr "复制文件"
 msgid "Paste here"
 msgstr "粘贴到此目录"
 
+msgid "Compress as ZIP"
+msgstr "压缩为 zip"
+
 msgid "Copy to session..."
 msgstr "复制到会话..."
 

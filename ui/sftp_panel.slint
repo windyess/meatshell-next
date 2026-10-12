@@ -202,6 +202,7 @@ export component SftpPanel inherits Rectangle {
     callback copy-path(string);
     callback copy-files(string /* menu-target */);  // stage remote paths for later paste
     callback paste-files();                // inject `cp -a` into the SSH session
+    callback zip-files(string /* menu-target */);  // remote zip -rq of file/dir selection
     callback new-folder(string /* parent dir */);
     callback new-file(string /* parent dir */);
     // Drag-to-dock: empty areas of the panel are a grab handle; coordinates are
@@ -1123,7 +1124,7 @@ export component SftpPanel inherits Rectangle {
                         x: root.menu-x;
                         y: root.menu-y;
                         width: 148px;
-                        height: 16 * 27px + 8px;
+                        height: 17 * 27px + 8px;
                         Rectangle {
                             background: Theme.popup-bg;
                             border-radius: Theme.radius-sm;
@@ -1183,6 +1184,11 @@ export component SftpPanel inherits Rectangle {
                                     label: @tr("Paste here");
                                     enabled: root.clipboard-count > 0;
                                     clicked => { root.paste-files(); }
+                                }
+                                SftpMenuItem {
+                                    label: @tr("Compress as ZIP");
+                                    enabled: root.menu-target != "" || root.selected-count > 0;
+                                    clicked => { root.zip-files(root.menu-target); }
                                 }
                                 SftpMenuItem {
                                     label: @tr("Copy to session...");
