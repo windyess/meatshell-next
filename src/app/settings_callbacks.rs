@@ -55,6 +55,8 @@ pub(super) fn apply_saved_appearance(ctx: &WinCtx) {
         window.set_output_highlight_rules(output_highlight_rule_model(&s));
         window.set_ui_scale(s.ui_scale() as f32 / 100.0); // global UI zoom (#100)
         window.set_panel_font(s.panel_font() as f32 / 100.0); // settings-panel font scale
+        window.set_sftp_list_px(s.sftp_list_font_px() as i32);
+        window.set_sftp_header_px(s.sftp_header_font_px() as i32);
         window.set_renderer_mode(s.renderer_mode().into());
         window.set_mcp_enabled(s.mcp_enabled());
         window.set_mcp_use_saved_credentials(s.mcp_use_saved_credentials());
@@ -82,6 +84,8 @@ pub(super) fn apply_saved_appearance(ctx: &WinCtx) {
         // light/dark preference. Built-in wallpapers only suggest their paired
         // theme when the user actively selects them (#theme-persistence).
         apply_wallpaper(&window, &store.borrow(), &bufs, &id, false);
+        let term_id = store.borrow().term_wallpaper().to_string();
+        apply_term_wallpaper(&window, &term_id);
     }
     // Editable inputs (e.g. the SFTP path bar) need a CJK-capable font: the
     // embedded mono font has no Chinese glyphs and native TextInput doesn't
@@ -326,6 +330,13 @@ pub(super) fn wire_layout_prefs(ctx: &WinCtx) {
         window.set_sftp_panel_width(s.sftp_panel_width());
         window.set_sftp_panel_height(s.sftp_panel_height());
         window.set_sftp_tree_width(s.sftp_tree_width());
+        window.set_sftp_col_name(s.sftp_col_width("name"));
+        window.set_sftp_col_size(s.sftp_col_width("size"));
+        window.set_sftp_col_modified(s.sftp_col_width("modified"));
+        window.set_sftp_col_type(s.sftp_col_width("type"));
+        window.set_sftp_col_permissions(s.sftp_col_width("permissions"));
+        window.set_sftp_col_owner(s.sftp_col_width("owner"));
+        window.set_sftp_col_group(s.sftp_col_width("group"));
         let columns = s.sftp_visible_columns();
         window.set_sftp_show_type(columns.iter().any(|column| column == "type"));
         window.set_sftp_show_size(columns.iter().any(|column| column == "size"));
@@ -346,6 +357,7 @@ pub(super) fn wire_layout_prefs(ctx: &WinCtx) {
         window.set_welcome_collapsed(welcome_collapsed);
         window.set_sidebar_collapsed(sidebar_collapsed);
         window.set_wallpaper_overlay(s.wallpaper_overlay());
+        window.set_term_wallpaper_overlay(s.term_wallpaper_overlay());
         window.set_update_check_enabled(s.update_check_enabled()); // #184
         if collapse_sftp {
             window.set_sftp_collapsed(true);
@@ -448,6 +460,14 @@ pub(super) fn wire_layout_prefs(ctx: &WinCtx) {
         window.on_persist_wallpaper_overlay(move |v| {
             let mut s = store.borrow_mut();
             s.set_wallpaper_overlay(v);
+            let _ = s.save();
+        });
+    }
+    {
+        let store = store.clone();
+        window.on_persist_term_wallpaper_overlay(move |v| {
+            let mut s = store.borrow_mut();
+            s.set_term_wallpaper_overlay(v);
             let _ = s.save();
         });
     }
@@ -650,6 +670,14 @@ pub(super) fn wire_terminal_settings(ctx: &WinCtx) {
     }
     {
         let store = store.clone();
+        window.on_persist_sftp_col_width(move |key: SharedString, width| {
+            let mut s = store.borrow_mut();
+            s.set_sftp_col_width(key.as_str(), width);
+            let _ = s.save();
+        });
+    }
+    {
+        let store = store.clone();
         let weak = window.as_weak();
         window.on_toggle_sftp_column(move |column: SharedString| {
             let columns = {
@@ -770,6 +798,36 @@ pub(super) fn wire_ui_scale_and_wallpaper(ctx: &WinCtx) {
             }
         });
     }
+    {
+        let weak = window.as_weak();
+        let store = store.clone();
+        window.on_set_sftp_list_px(move |px: i32| {
+            let clamped = (px.max(0) as u32).clamp(10, 22);
+            {
+                let mut s = store.borrow_mut();
+                s.set_sftp_list_font_px(clamped);
+                let _ = s.save();
+            }
+            if let Some(w) = weak.upgrade() {
+                w.set_sftp_list_px(clamped as i32);
+            }
+        });
+    }
+    {
+        let weak = window.as_weak();
+        let store = store.clone();
+        window.on_set_sftp_header_px(move |px: i32| {
+            let clamped = (px.max(0) as u32).clamp(10, 20);
+            {
+                let mut s = store.borrow_mut();
+                s.set_sftp_header_font_px(clamped);
+                let _ = s.save();
+            }
+            if let Some(w) = weak.upgrade() {
+                w.set_sftp_header_px(clamped as i32);
+            }
+        });
+    }
 
     // Wallpaper: pick a built-in / none, or open the file dialog for a custom one.
     {
@@ -830,6 +888,39 @@ pub(super) fn wire_ui_scale_and_wallpaper(ctx: &WinCtx) {
                 }
                 let mut s = store.borrow_mut();
                 s.set_wallpaper(id);
+                let _ = s.save();
+            }
+        });
+    }
+    {
+        let weak = window.as_weak();
+        let store = store.clone();
+        window.on_set_term_wallpaper(move |id: SharedString| {
+            let id = id.to_string();
+            if let Some(w) = weak.upgrade() {
+                apply_term_wallpaper(&w, &id);
+            }
+            let mut s = store.borrow_mut();
+            s.set_term_wallpaper(id);
+            let _ = s.save();
+        });
+    }
+    {
+        let weak = window.as_weak();
+        let store = store.clone();
+        window.on_pick_term_wallpaper_file(move || {
+            let picked = DialogOwner::of_weak(&weak)
+                .file()
+                .set_title("选择终端壁纸 / Choose terminal wallpaper")
+                .add_filter("Images", &["png", "jpg", "jpeg", "webp", "bmp"])
+                .pick_file();
+            if let Some(path) = picked {
+                let id = path.to_string_lossy().to_string();
+                if let Some(w) = weak.upgrade() {
+                    apply_term_wallpaper(&w, &id);
+                }
+                let mut s = store.borrow_mut();
+                s.set_term_wallpaper(id);
                 let _ = s.save();
             }
         });

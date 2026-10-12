@@ -1,6 +1,6 @@
 import { ScrollView } from "std-widgets.slint";
 import { Theme } from "theme.slint";
-import { SftpPanel, SftpEntry, SftpTreeNode, TunnelInfo } from "sftp_panel.slint";
+import { SftpPanel, SftpEntry, SftpTreeNode, TunnelInfo, QuickCmd } from "sftp_panel.slint";
 import { TabInfo } from "tabs.slint";
 import { DockExpandButton, ToolStrip } from "widgets.slint";
 
@@ -37,25 +37,6 @@ export struct TermMatch {
     row: int,
     col: int,
     len: int,
-}
-
-// One saved quick command (#55): a name shown on the chip + the text to send.
-// Grouped like the welcome session list: group-header is non-empty on the first
-// row of each group; collapsed hides the group's rows in the popup; orig-index
-// points back to the entry's position in the stored list (delete target).
-export struct QuickCmd {
-    name: string,
-    command: string,
-    group: string,
-    group-header: string,
-    collapsed: bool,
-    orig-index: int,
-    // false → clicking only fills the input box (no trailing Return), so the
-    // command can be tweaked before sending; true → send + execute (B站 suggestion).
-    send-enter: bool,
-    // `command` flattened to one line for display (#419); multi-line commands
-    // used to overflow their fixed-height rows.
-    command-preview: string,
 }
 
 // --- MenuItem --------------------------------------------------------------
@@ -319,12 +300,21 @@ export component TerminalView inherits Rectangle {
     callback set-sftp-panel-width(length);
     callback set-sftp-saved-height(length);
     callback persist-sftp-tree-width(length);
+    in-out property <length> sftp-col-name: 220px;
+    in-out property <length> sftp-col-size: 72px;
+    in-out property <length> sftp-col-modified: 116px;
+    in-out property <length> sftp-col-type: 100px;
+    in-out property <length> sftp-col-permissions: 104px;
+    in-out property <length> sftp-col-owner: 84px;
+    in-out property <length> sftp-col-group: 84px;
+    callback persist-sftp-col-width(string, length);
     callback toggle-sftp-column(string);
     callback set-sftp-collapsed(bool);
 
     // --- SFTP docking (within the terminal area) ---------------------------
     // Which edge of the terminal area the SFTP panel sits on: left|right|top|bottom.
     in-out property <string> sftp-dock: "bottom";
+    in-out property <string> sftp-panel-mode: "files";
     property <bool> sftp-horizontal: root.sftp-dock == "left" || root.sftp-dock == "right";
     // Drag-to-dock snap state (mirrors the resource-panel docking in app.slint).
     property <bool> sftp-panel-dragging;
@@ -425,6 +415,7 @@ export component TerminalView inherits Rectangle {
     callback sftp-copy-files(string /* menu-target */);
     callback sftp-paste-files();
     callback sftp-zip-files(string /* menu-target */);
+    callback sftp-cd-terminal(string /* path */);
     in property <int> sftp-clipboard-count;
     callback sftp-new-folder(string);
     callback sftp-new-file(string);
@@ -504,8 +495,22 @@ export component TerminalView inherits Rectangle {
         }
     }
 
-    background: Theme.term-bg;
+    background: Theme.term-wallpaper-own ? transparent : Theme.term-bg;
     forward-focus: ime-input;
+
+    if Theme.term-wallpaper-own : Image {
+        x: 0; y: 0;
+        width: parent.width;
+        height: parent.height;
+        source: Theme.term-wallpaper;
+        image-fit: cover;
+    }
+    if Theme.term-wallpaper-own : Rectangle {
+        x: 0; y: 0;
+        width: parent.width;
+        height: parent.height;
+        background: Theme.term-bg;
+    }
 
     // Drag state (private)
     property <bool>   sftp-dragging:     false;
@@ -1710,7 +1715,7 @@ export component TerminalView inherits Rectangle {
             // --- Quick-command popup (opens upward) --------------------------
             if root.quick-open : Rectangle {
                 x: 8px;
-                width: 420px;
+                width: 560px;
                 height: min(320px, qc-col.preferred-height + 8px);
                 y: -self.height - 2px;
                 background: Theme.popup-bg;
@@ -1801,8 +1806,13 @@ export component TerminalView inherits Rectangle {
                             }
                             if !q.collapsed && q.orig-index >= 0 : Rectangle {
                                 height: 30px;
-                                border-radius: Theme.radius-sm;
                                 background: q-item-ta.has-hover ? Theme.bg-hover : transparent;
+                                Rectangle {
+                                    y: parent.height - 1px;
+                                    height: 1px;
+                                    width: parent.width;
+                                    background: Theme.row-rule;
+                                }
                                 property <length> ctx-x;
                                 property <length> ctx-y;
                                 q-item-ta := TouchArea {
@@ -1832,7 +1842,7 @@ export component TerminalView inherits Rectangle {
                                 // so a long command can't squeeze it to "…" (#419).
                                 HorizontalLayout {
                                     padding-left: 8px; padding-right: 8px; spacing: 10px;
-                                    Text { text: q.name; color: Theme.text-primary; font-size: Theme.fs-sm;
+                                    Text { text: q.name; color: Theme.text-primary; font-size: Theme.fs-xs;
                                            vertical-alignment: center; overflow: elide;
                                            width: min(self.preferred-width, (parent.width - 26px) * 0.45); }
                                     Text { text: q.command-preview; color: Theme.text-muted; font-size: Theme.fs-xs;
@@ -1948,8 +1958,8 @@ export component TerminalView inherits Rectangle {
 
             // --- History popup (opens upward) -------------------------------
             if root.history-open : Rectangle {
-                x: parent.width - 308px;
-                width: 300px;
+                x: parent.width - 488px;
+                width: 480px;
                 height: root.history-autocomplete
                     ? min(180px, max(36px, h-col.preferred-height + 8px))
                     : min(296px, 46px + max(28px, min(228px, h-col.preferred-height + 8px)));
@@ -2003,9 +2013,15 @@ export component TerminalView inherits Rectangle {
                         }
                         for h[idx] in root.history-view : Rectangle {
                             height: 28px;
-                            border-radius: Theme.radius-sm;
-                            background: idx == root.history-selected ? Theme.bg-active
+                            background: idx == root.history-selected
+                                      ? Theme.accent.with-alpha(0.16)
                                       : (h-item-ta.has-hover ? Theme.bg-hover : transparent);
+                            if idx < root.history-view.length - 1 : Rectangle {
+                                y: parent.height - 1px;
+                                height: 1px;
+                                width: parent.width;
+                                background: Theme.row-rule;
+                            }
                             // Row body click recalls the command into the input box.
                             h-item-ta := TouchArea {
                                 mouse-cursor: pointer;
@@ -2020,7 +2036,7 @@ export component TerminalView inherits Rectangle {
                                 Text {
                                     text: idx < root.history-preview.length ? root.history-preview[idx] : h;
                                     color: Theme.text-secondary;
-                                    font-size: Theme.fs-sm;
+                                    font-size: Theme.fs-xs;
                                     font-family: Theme.ui-font-family;
                                     vertical-alignment: center;
                                     horizontal-stretch: 1;
@@ -2231,6 +2247,14 @@ export component TerminalView inherits Rectangle {
             show-tree: !root.sftp-horizontal;   // hide the tree when narrow (vertical)
             tree-width: root.sftp-tree-width;
             persist-tree-width(width) => { root.persist-sftp-tree-width(width); }
+            col-name <=> root.sftp-col-name;
+            col-size <=> root.sftp-col-size;
+            col-modified <=> root.sftp-col-modified;
+            col-type <=> root.sftp-col-type;
+            col-permissions <=> root.sftp-col-permissions;
+            col-owner <=> root.sftp-col-owner;
+            col-group <=> root.sftp-col-group;
+            persist-col-width(k, v) => { root.persist-sftp-col-width(k, v); }
             show-type: root.sftp-show-type;
             show-size: root.sftp-show-size;
             show-modified: root.sftp-show-modified;
@@ -2252,6 +2276,20 @@ export component TerminalView inherits Rectangle {
                 root.sftp-panel-dragging = false;
             }
             collapsed:     root.sftp-collapsed;
+            panel-mode <=> root.sftp-panel-mode;
+            quick-commands: root.quick-commands;
+            quick-activate(cmd, send-enter) => {
+                if (send-enter) {
+                    root.run-command(cmd, root.send-to-all);
+                    root.focus-pending = true;
+                } else {
+                    cmd-input.text = cmd;
+                    cmd-input.focus();
+                }
+            }
+            quick-edit(i) => { root.edit-quick-command(i); }
+            quick-toggle-group(g) => { root.toggle-quick-group(g); }
+            quick-manage() => { root.manage-quick-commands(); }
             current-tab-id: root.tab-id;
             current-path:  root.sftp-path;
             entries:       root.sftp-entries;
@@ -2305,6 +2343,7 @@ export component TerminalView inherits Rectangle {
             copy-files(path)    => { root.sftp-copy-files(path); }
             paste-files()       => { root.sftp-paste-files(); }
             zip-files(path)     => { root.sftp-zip-files(path); }
+            cd-terminal(path)   => { root.sftp-cd-terminal(path); }
             new-folder(dir)     => { root.sftp-new-folder(dir); }
             new-file(dir)       => { root.sftp-new-file(dir); }
         }

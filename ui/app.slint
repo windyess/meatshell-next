@@ -22,8 +22,8 @@ import { SessionDialog, SessionDraft, PortFwd, TriggerDraft, JumpHop } from "ses
 import { ConfirmDialog } from "confirm_dialog.slint";
 import { ModalLayer, ModalKind } from "modal.slint";
 import { LabeledInput, PrimaryButton, GhostButton, DockExpandButton, IconButton, ToolStrip } from "widgets.slint";
-import { TerminalView, TermSpan, TermMatch, QuickCmd, QuickDockPanel } from "terminal_view.slint";
-import { SftpEntry, SftpTreeNode, TunnelInfo } from "sftp_panel.slint";
+import { TerminalView, TermSpan, TermMatch, QuickDockPanel } from "terminal_view.slint";
+import { SftpEntry, SftpTreeNode, TunnelInfo, QuickCmd } from "sftp_panel.slint";
 import { ProcWindow, ProcRow } from "proc_window.slint";
 import { SystemInfoWindow, SysInfoRow, SysMetricRow, SysNetRow } from "system_info_window.slint";
 import { EditorWindow, EditorFindResult } from "editor_window.slint";
@@ -567,6 +567,10 @@ export component AppWindow inherits Window {
     in-out property <float> ui-scale <=> Theme.ui-scale;   // global UI zoom (#100)
     in-out property <float> panel-font <=> Theme.panel-font;  // settings-panel font scale
     callback set-panel-font(int);                          // apply + persist (percent)
+    in-out property <int> sftp-list-px <=> Theme.sftp-list-px;
+    in-out property <int> sftp-header-px <=> Theme.sftp-header-px;
+    callback set-sftp-list-px(int);
+    callback set-sftp-header-px(int);
     in-out property <string> ui-font-family <=> Theme.ui-font-family;
     // Window focused & visible — Rust drives it from winit events; gates the
     // cursor blink so an idle background window stops repainting (#127).
@@ -579,11 +583,16 @@ export component AppWindow inherits Window {
     // Wallpaper / immersive theming — Rust drives these from the wallpaper module.
     in-out property <image> wallpaper-img <=> Theme.wallpaper;
     in-out property <bool> wallpaper-active <=> Theme.wallpaper-active;
+    in-out property <image> term-wallpaper-img <=> Theme.term-wallpaper;
+    in-out property <bool> term-wallpaper-own <=> Theme.term-wallpaper-own;
+    in-out property <bool> term-wallpaper-none <=> Theme.term-wallpaper-none;
     in-out property <color> wp-accent <=> Theme.wp-accent;
     in-out property <color> wp-tint <=> Theme.wp-tint;
     // User-adjustable wallpaper overlay opacity (0.30–1.00), persisted.
     in-out property <float> wallpaper-overlay <=> Theme.panel-alpha;
     callback persist-wallpaper-overlay(float);
+    in-out property <float> term-wallpaper-overlay <=> Theme.term-alpha;
+    callback persist-term-wallpaper-overlay(float);
     in property <[string]> term-fonts;             // installed monospace families
     in-out property <bool> interface-open: false;  // Interface settings overlay
     // Interface card position (draggable by its title bar, clamped inside the
@@ -635,10 +644,14 @@ export component AppWindow inherits Window {
     // feed the Interface → Wallpaper picker.
     in-out property <string> current-wallpaper: "";
     in-out property <string> custom-wallpaper-name: "";
+    in-out property <string> current-term-wallpaper: "";
+    in-out property <string> custom-term-wallpaper-name: "";
     in property <[WslProfileInfo]> wsl-profiles;
     in-out property <string> wsl-new-directory: "~";
     callback set-wallpaper(string);                // apply + persist a wallpaper id
     callback pick-wallpaper-file();                // open the OS file dialog (Rust)
+    callback set-term-wallpaper(string);           // terminal-pane wallpaper only
+    callback pick-term-wallpaper-file();
     // SFTP follows the terminal's cd; opt out in Interface settings.
     in-out property <bool> sftp-follow-cd: true;
     callback set-sftp-follow-cd(bool);             // apply + persist
@@ -703,6 +716,14 @@ export component AppWindow inherits Window {
     in-out property <length> sftp-saved-height: 220px;  // restore height on un-collapse
     in-out property <length> sftp-tree-width: 160px;
     callback persist-sftp-tree-width(length);
+    in-out property <length> sftp-col-name: 220px;
+    in-out property <length> sftp-col-size: 72px;
+    in-out property <length> sftp-col-modified: 116px;
+    in-out property <length> sftp-col-type: 100px;
+    in-out property <length> sftp-col-permissions: 104px;
+    in-out property <length> sftp-col-owner: 84px;
+    in-out property <length> sftp-col-group: 84px;
+    callback persist-sftp-col-width(string, length);
     in-out property <bool> sftp-show-type: true;
     in-out property <bool> sftp-show-size: true;
     in-out property <bool> sftp-show-modified: true;
@@ -1152,6 +1173,7 @@ export component AppWindow inherits Window {
     callback sftp-copy-files(string /* tab-id */, string /* menu-target */);
     callback sftp-paste-files(string /* tab-id */);
     callback sftp-zip-files(string /* tab-id */, string /* menu-target */);
+    callback sftp-cd-terminal(string /* tab-id */, string /* path */);
 
     // Visual chmod dialog (#84). Rust decomposes the current mode into nine
     // bools when opening and recomposes on apply (Slint has no bitwise ops).
@@ -1987,6 +2009,14 @@ export component AppWindow inherits Window {
                         set-sftp-saved-height(v) => { root.set-pane-sftp-saved-height(term.id, v); }
                         sftp-tree-width: root.sftp-tree-width;
                         persist-sftp-tree-width(v) => { root.persist-sftp-tree-width(v); }
+                        sftp-col-name <=> root.sftp-col-name;
+                        sftp-col-size <=> root.sftp-col-size;
+                        sftp-col-modified <=> root.sftp-col-modified;
+                        sftp-col-type <=> root.sftp-col-type;
+                        sftp-col-permissions <=> root.sftp-col-permissions;
+                        sftp-col-owner <=> root.sftp-col-owner;
+                        sftp-col-group <=> root.sftp-col-group;
+                        persist-sftp-col-width(k, v) => { root.persist-sftp-col-width(k, v); }
                         sftp-show-type: root.sftp-show-type;
                         sftp-show-size: root.sftp-show-size;
                         sftp-show-modified: root.sftp-show-modified;
@@ -2114,6 +2144,7 @@ export component AppWindow inherits Window {
                         sftp-copy-files(path) => { root.sftp-copy-files(term.id, path); }
                         sftp-paste-files() => { root.sftp-paste-files(term.id); }
                         sftp-zip-files(path) => { root.sftp-zip-files(term.id, path); }
+                        sftp-cd-terminal(path) => { root.sftp-cd-terminal(term.id, path); }
                         sftp-new-folder(dir) => {
                             root.sftp-prompt-kind = "mkdir";
                             root.sftp-prompt-tab = term.id;
@@ -5235,12 +5266,17 @@ export component AppWindow inherits Window {
                     mcp-allow-commands <=> root.mcp-allow-commands;
                     mcp-allow-file-transfers <=> root.mcp-allow-file-transfers;
                     wallpaper-overlay <=> root.wallpaper-overlay;
+                    term-wallpaper-overlay <=> root.term-wallpaper-overlay;
                     current-wallpaper: root.current-wallpaper;
                     custom-wallpaper-name: root.custom-wallpaper-name;
+                    current-term-wallpaper: root.current-term-wallpaper;
+                    custom-term-wallpaper-name: root.custom-term-wallpaper-name;
                     wsl-profiles: root.wsl-profiles;
                     wsl-new-directory <=> root.wsl-new-directory;
                     set-wallpaper(v) => { root.set-wallpaper(v); }
                     pick-wallpaper-file() => { root.pick-wallpaper-file(); }
+                    set-term-wallpaper(v) => { root.set-term-wallpaper(v); }
+                    pick-term-wallpaper-file() => { root.pick-term-wallpaper-file(); }
                     set-term-font(v) => { root.set-term-font(v); }
                     set-term-font-size(v) => { root.set-term-font-size(v); }
                     set-terminal-line-spacing(v) => { root.set-terminal-line-spacing(v); }
@@ -5263,6 +5299,10 @@ export component AppWindow inherits Window {
                     }
                     set-ui-scale(v) => { root.set-ui-scale(v); }
                     set-panel-font(v) => { root.set-panel-font(v); }
+                    sftp-list-px <=> root.sftp-list-px;
+                    sftp-header-px <=> root.sftp-header-px;
+                    set-sftp-list-px(v) => { root.set-sftp-list-px(v); }
+                    set-sftp-header-px(v) => { root.set-sftp-header-px(v); }
                     set-renderer-mode(v) => { root.set-renderer-mode(v); }
                     set-sftp-follow-cd(v) => { root.set-sftp-follow-cd(v); }
                     set-collapse-sidebar-default(v) => { root.set-collapse-sidebar-default(v); }
@@ -5298,6 +5338,7 @@ export component AppWindow inherits Window {
                     remove-wsl-profile(id) => { root.remove-wsl-profile(id); }
                     pick-wsl-directory => { root.pick-wsl-directory(); }
                     persist-wallpaper-overlay(v) => { root.persist-wallpaper-overlay(v); }
+                    persist-term-wallpaper-overlay(v) => { root.persist-term-wallpaper-overlay(v); }
                 }
             }
             Rectangle {

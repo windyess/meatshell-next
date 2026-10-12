@@ -814,6 +814,20 @@ pub(super) fn wire_sftp_callbacks(
             });
         });
     }
+    {
+        let handles = handles.clone();
+        window.on_sftp_cd_terminal(move |tab_id: SharedString, path: SharedString| {
+            let path = path.trim();
+            if path.is_empty() {
+                return;
+            }
+            let cmd = format!("cd {}", posix_shell_quote(path));
+            let (_history, bytes) = encode_command_bar_input(&cmd);
+            if let Some(handle) = handles.borrow().get(tab_id.as_str()) {
+                handle.send_raw(bytes);
+            }
+        });
+    }
 
     // Visual chmod dialog (#84): decompose the current mode into nine bools on
     // open, recompose on apply (Slint has no bitwise ops).

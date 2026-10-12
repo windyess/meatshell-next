@@ -1022,6 +1022,14 @@ impl ConfigStore {
         self.cache.wallpaper = id.into();
     }
 
+    pub fn term_wallpaper(&self) -> &str {
+        &self.cache.term_wallpaper
+    }
+
+    pub fn set_term_wallpaper(&mut self, id: impl Into<String>) {
+        self.cache.term_wallpaper = id.into();
+    }
+
     /// Whether the SFTP panel follows the terminal's cd (default true).
     pub fn sftp_follow_cd(&self) -> bool {
         !self.cache.sftp_no_follow_cd
@@ -1354,6 +1362,19 @@ impl ConfigStore {
     pub fn set_wallpaper_overlay(&mut self, v: f32) {
         self.cache.wallpaper_overlay = v.clamp(0.30, 1.0);
     }
+
+    pub fn term_wallpaper_overlay(&self) -> f32 {
+        let a = self.cache.term_wallpaper_overlay;
+        if a <= 0.0 {
+            self.wallpaper_overlay()
+        } else {
+            a.clamp(0.30, 1.0)
+        }
+    }
+
+    pub fn set_term_wallpaper_overlay(&mut self, v: f32) {
+        self.cache.term_wallpaper_overlay = v.clamp(0.30, 1.0);
+    }
     pub fn panel_font(&self) -> u32 {
         if self.cache.panel_font == 0 {
             100
@@ -1363,6 +1384,30 @@ impl ConfigStore {
     }
     pub fn set_panel_font(&mut self, percent: u32) {
         self.cache.panel_font = percent.clamp(80, 160);
+    }
+
+    pub fn sftp_list_font_px(&self) -> u32 {
+        if self.cache.sftp_list_font_px == 0 {
+            15
+        } else {
+            self.cache.sftp_list_font_px.clamp(10, 22)
+        }
+    }
+
+    pub fn set_sftp_list_font_px(&mut self, px: u32) {
+        self.cache.sftp_list_font_px = px.clamp(10, 22);
+    }
+
+    pub fn sftp_header_font_px(&self) -> u32 {
+        if self.cache.sftp_header_font_px == 0 {
+            13
+        } else {
+            self.cache.sftp_header_font_px.clamp(10, 20)
+        }
+    }
+
+    pub fn set_sftp_header_font_px(&mut self, px: u32) {
+        self.cache.sftp_header_font_px = px.clamp(10, 20);
     }
     pub fn sftp_panel_width(&self) -> f32 {
         let w = self.cache.sftp_panel_width;
@@ -1396,6 +1441,37 @@ impl ConfigStore {
     }
     pub fn set_sftp_tree_width(&mut self, width: f32) {
         self.cache.sftp_tree_width = width.clamp(120.0, 420.0);
+    }
+
+    pub fn sftp_col_width(&self, key: &str) -> f32 {
+        let (raw, def, min, max) = match key {
+            "name" => (self.cache.sftp_col_name, 220.0, 120.0, 640.0),
+            "size" => (self.cache.sftp_col_size, 72.0, 48.0, 240.0),
+            "modified" => (self.cache.sftp_col_modified, 116.0, 72.0, 280.0),
+            "type" => (self.cache.sftp_col_type, 100.0, 64.0, 240.0),
+            "permissions" => (self.cache.sftp_col_permissions, 104.0, 72.0, 240.0),
+            "owner" => (self.cache.sftp_col_owner, 84.0, 56.0, 220.0),
+            "group" => (self.cache.sftp_col_group, 84.0, 56.0, 220.0),
+            _ => return 80.0,
+        };
+        if raw <= 0.0 {
+            def
+        } else {
+            raw.clamp(min, max)
+        }
+    }
+
+    pub fn set_sftp_col_width(&mut self, key: &str, width: f32) {
+        match key {
+            "name" => self.cache.sftp_col_name = width.clamp(120.0, 640.0),
+            "size" => self.cache.sftp_col_size = width.clamp(48.0, 240.0),
+            "modified" => self.cache.sftp_col_modified = width.clamp(72.0, 280.0),
+            "type" => self.cache.sftp_col_type = width.clamp(64.0, 240.0),
+            "permissions" => self.cache.sftp_col_permissions = width.clamp(72.0, 240.0),
+            "owner" => self.cache.sftp_col_owner = width.clamp(56.0, 220.0),
+            "group" => self.cache.sftp_col_group = width.clamp(56.0, 220.0),
+            _ => {}
+        }
     }
     pub fn sftp_visible_columns(&self) -> Vec<String> {
         const COLUMNS: &[&str] = &[

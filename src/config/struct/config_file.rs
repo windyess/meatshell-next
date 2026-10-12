@@ -143,6 +143,10 @@ pub struct ConfigFile {
     /// wallpaper + tinted theme. Defaults to the "幻想 3048" built-in.
     #[serde(default = "default_wallpaper")]
     pub wallpaper: String,
+    /// Wallpaper for the terminal pane only. Empty = follow the window wallpaper;
+    /// `"none"` = solid terminal background; otherwise a builtin id or file path.
+    #[serde(default)]
+    pub term_wallpaper: String,
     /// Explicit session groups/folders (#41), including empty ones so a folder
     /// can exist before any session is moved into it. "default" is implicit and
     /// not stored here.
@@ -225,6 +229,20 @@ pub struct ConfigFile {
     #[serde(default = "default_sftp_tree_width")]
     pub sftp_tree_width: f32,
     #[serde(default)]
+    pub sftp_col_name: f32,
+    #[serde(default)]
+    pub sftp_col_size: f32,
+    #[serde(default)]
+    pub sftp_col_modified: f32,
+    #[serde(default)]
+    pub sftp_col_type: f32,
+    #[serde(default)]
+    pub sftp_col_permissions: f32,
+    #[serde(default)]
+    pub sftp_col_owner: f32,
+    #[serde(default)]
+    pub sftp_col_group: f32,
+    #[serde(default)]
     pub sftp_dock: String,
     /// Columns shown in the SFTP file list. Unknown values are ignored by the
     /// accessor so newer builds can safely read older or hand-edited configs.
@@ -275,9 +293,18 @@ pub struct ConfigFile {
     /// Interface › Wallpaper opacity slider. 0 = use the current default.
     #[serde(default)]
     pub wallpaper_overlay: f32,
+    /// Frost opacity over the terminal pane (0.30–1.00). 0 = follow wallpaper_overlay.
+    #[serde(default)]
+    pub term_wallpaper_overlay: f32,
     /// Settings-panel font scale, percent (80–160). 0 = 100% default (v0.5).
     #[serde(default)]
     pub panel_font: u32,
+    /// SFTP filename / list body font size in px. 0 = 15.
+    #[serde(default)]
+    pub sftp_list_font_px: u32,
+    /// SFTP column-header font size in px. 0 = 13.
+    #[serde(default)]
+    pub sftp_header_font_px: u32,
     /// Disable the startup "new version available" check (#184). Default false =
     /// keep checking (preserves existing behaviour for upgrading users); turning
     /// it on stops the GitHub releases query and the banner.

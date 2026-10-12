@@ -234,6 +234,9 @@ msgstr "Permissions"
 msgid "Copy path"
 msgstr "Copy path"
 
+msgid "CD in terminal"
+msgstr "CD in terminal"
+
 msgid "Copy file"
 msgstr "Copy file"
 
@@ -248,6 +251,15 @@ msgstr "Copy to session..."
 
 msgid "Refresh"
 msgstr "Refresh"
+
+msgid "Commands"
+msgstr "Commands"
+
+msgid "Manage"
+msgstr "Manage"
+
+msgid "default"
+msgstr "default"
 
 msgid "New folder"
 msgstr "New folder"

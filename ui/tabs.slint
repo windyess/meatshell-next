@@ -41,8 +41,8 @@ component SingleTab inherits Rectangle {
     height: 30px;
     width: self.preferred-width;
     border-radius: Theme.radius-sm;
-    border-width: active ? 2px : 0px;
-    border-color: active ? Theme.accent : transparent;
+    border-width: active ? 1px : 0px;
+    border-color: active ? Theme.tab-active-border : transparent;
     background: lifted ? Theme.bg-active
         : (active ? Theme.tab-active-bg
         : (touch.has-hover ? Theme.bg-hover : transparent));
@@ -126,9 +126,9 @@ component SingleTab inherits Rectangle {
 
         title-text := Text {
             text: info.title;
-            color: active ? Theme.text-primary : Theme.text-secondary;
-            font-size: info.title_len > 24 ? 9px * Theme.ui-scale
-                : (info.title_len > 12 ? 10px * Theme.ui-scale : Theme.fs-sm);
+            color: active ? Theme.tab-active-fg : Theme.text-primary.with-alpha(0.82);
+            font-size: Theme.fs-md;
+            font-weight: active ? 700 : 500;
             vertical-alignment: center;
             overflow: elide;
             horizontal-stretch: 0;
@@ -141,6 +141,8 @@ component SingleTab inherits Rectangle {
             IconButton {
                 glyph: "×";
                 size: 20px;
+                fg: active ? #5a5d66 : Theme.text-secondary;
+                fg-hover: active ? Theme.tab-active-fg : Theme.text-primary;
                 y: (parent.height - self.height) / 2;
                 clicked => { root.closed(); }
             }

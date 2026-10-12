@@ -402,9 +402,12 @@ export component InterfacePanel inherits Rectangle {
     in-out property <bool> mcp-allow-commands: true;
     in-out property <bool> mcp-allow-file-transfers: true;
     in-out property <float> wallpaper-overlay;   // frosted-panel opacity 0.30-1.00
+    in-out property <float> term-wallpaper-overlay;
     // Active wallpaper id: "" / "builtin:light" / "builtin:dark" / a file path.
     in property <string> current-wallpaper;
     in property <string> custom-wallpaper-name;   // basename for the file row
+    in property <string> current-term-wallpaper;
+    in property <string> custom-term-wallpaper-name;
     in property <[WslProfileInfo]> wsl-profiles;
     in-out property <string> wsl-new-name: "WSL";
     in-out property <string> wsl-new-distribution;
@@ -421,6 +424,11 @@ export component InterfacePanel inherits Rectangle {
         root.current-wallpaper != "" && root.current-wallpaper != "builtin:light"
         && root.current-wallpaper != "builtin:dark" && root.current-wallpaper != "builtin:tech"
         && root.current-wallpaper != "builtin:miku" && root.current-wallpaper != "builtin:ms";
+    property <bool> term-wp-is-custom:
+        root.current-term-wallpaper != "" && root.current-term-wallpaper != "none"
+        && root.current-term-wallpaper != "builtin:light"
+        && root.current-term-wallpaper != "builtin:dark" && root.current-term-wallpaper != "builtin:tech"
+        && root.current-term-wallpaper != "builtin:miku" && root.current-term-wallpaper != "builtin:ms";
 
     callback set-term-font(string);
     callback set-term-font-size(int);
@@ -435,6 +443,10 @@ export component InterfacePanel inherits Rectangle {
     callback set-output-highlight-rule-enabled(int, bool);
     callback set-ui-scale(int);
     callback set-panel-font(int);   // settings-panel font scale, percent
+    in-out property <int> sftp-list-px: 15;
+    in-out property <int> sftp-header-px: 13;
+    callback set-sftp-list-px(int);
+    callback set-sftp-header-px(int);
     callback set-renderer-mode(string);
     callback set-sftp-follow-cd(bool);
     callback set-collapse-sidebar-default(bool);
@@ -456,8 +468,11 @@ export component InterfacePanel inherits Rectangle {
     callback set-update-check-enabled(bool);   // startup new-version check (#184)
     callback set-mcp-permissions(bool, bool, bool, bool);
     callback persist-wallpaper-overlay(float);   // save the overlay opacity
+    callback persist-term-wallpaper-overlay(float);
     callback set-wallpaper(string);    // none / builtin selection
     callback pick-wallpaper-file();    // open the OS file dialog (Rust)
+    callback set-term-wallpaper(string);
+    callback pick-term-wallpaper-file();
     callback add-wsl-profile(string, string, string);
     callback remove-wsl-profile(string);
     callback pick-wsl-directory();
@@ -1172,19 +1187,201 @@ export component InterfacePanel inherits Rectangle {
                 }
 
                 Rectangle { height: 16px; }
+                SectionHeader { text: root.lang-en ? "TERMINAL AREA" : "终端区域"; height: 22px; }
+                Text {
+                    text: root.lang-en
+                        ? "Override only the terminal pane. Follow UI uses the wallpaper above; None keeps a solid terminal background."
+                        : "只覆盖终端区域显示，不影响侧栏和设置面板。跟随界面则用上面的壁纸；无则保持纯色终端底。";
+                    color: Theme.text-muted; font-size: 11px * Theme.panel-font; wrap: word-wrap;
+                }
+                Rectangle { height: 10px; }
+                term-wallpapers-scroll := ScrollView {
+                    height: 106px;
+                    width: 100%;
+                    viewport-width: max(self.visible-width, term-wallpapers-row.preferred-width);
+                    viewport-height: self.visible-height;
+                    term-wallpapers-row := HorizontalLayout {
+                        spacing: 11px;
+                        alignment: start;
+                        VerticalLayout {
+                            spacing: 5px;
+                            WallpaperSwatch {
+                                width: 100px;
+                                selected: root.current-term-wallpaper == "";
+                                clicked => { root.set-term-wallpaper(""); }
+                                Rectangle {
+                                    width: 100%; height: 100%;
+                                    background: Theme.bg-elevated;
+                                    Text {
+                                        text: "\u{E8EA}";
+                                        font-family: "Material Icons"; color: Theme.text-muted;
+                                        font-size: 22px * Theme.panel-font;
+                                        width: 100%; height: 100%;
+                                        horizontal-alignment: center; vertical-alignment: center;
+                                    }
+                                }
+                            }
+                            Text { text: root.lang-en ? "Follow UI" : "跟随界面"; font-size: 11px * Theme.panel-font;
+                                   color: Theme.text-secondary; horizontal-alignment: center; }
+                        }
+                        VerticalLayout {
+                            spacing: 5px;
+                            WallpaperSwatch {
+                                width: 100px;
+                                selected: root.current-term-wallpaper == "none";
+                                clicked => { root.set-term-wallpaper("none"); }
+                                Rectangle {
+                                    width: 100%; height: 100%;
+                                    background: #0e0f13;
+                                    Text {
+                                        text: "\u{E14C}";
+                                        font-family: "Material Icons"; color: Theme.text-muted;
+                                        font-size: 22px * Theme.panel-font;
+                                        width: 100%; height: 100%;
+                                        horizontal-alignment: center; vertical-alignment: center;
+                                    }
+                                }
+                            }
+                            Text { text: root.lang-en ? "None" : "无"; font-size: 11px * Theme.panel-font;
+                                   color: Theme.text-secondary; horizontal-alignment: center; }
+                        }
+                        VerticalLayout {
+                            spacing: 5px;
+                            WallpaperSwatch {
+                                width: 100px;
+                                selected: root.current-term-wallpaper == "builtin:light";
+                                clicked => { root.set-term-wallpaper("builtin:light"); }
+                                Rectangle {
+                                    width: 100%; height: 100%;
+                                    background: @linear-gradient(135deg, #eff3fb 0%, #d5e1f2 100%);
+                                }
+                            }
+                            Text { text: root.lang-en ? "Meat Light" : "简约·浅"; font-size: 11px * Theme.panel-font;
+                                   color: Theme.text-secondary; horizontal-alignment: center; }
+                        }
+                        VerticalLayout {
+                            spacing: 5px;
+                            WallpaperSwatch {
+                                width: 100px;
+                                selected: root.current-term-wallpaper == "builtin:dark";
+                                clicked => { root.set-term-wallpaper("builtin:dark"); }
+                                Rectangle {
+                                    width: 100%; height: 100%;
+                                    background: @linear-gradient(135deg, #10131a 0%, #1b2233 100%);
+                                }
+                            }
+                            Text { text: root.lang-en ? "Meat Dark" : "简约·暗"; font-size: 11px * Theme.panel-font;
+                                   color: Theme.text-secondary; horizontal-alignment: center; }
+                        }
+                        VerticalLayout {
+                            spacing: 5px;
+                            WallpaperSwatch {
+                                width: 100px;
+                                selected: root.current-term-wallpaper == "builtin:tech";
+                                clicked => { root.set-term-wallpaper("builtin:tech"); }
+                                Rectangle {
+                                    width: 100%; height: 100%;
+                                    background: @linear-gradient(180deg, #05060f 0%, #0b1430 55%, #1a0a2e 100%);
+                                }
+                            }
+                            Text { text: root.lang-en ? "Fantasy 3048" : "幻想3048"; font-size: 11px * Theme.panel-font;
+                                   color: Theme.text-secondary; horizontal-alignment: center; }
+                        }
+                        VerticalLayout {
+                            spacing: 5px;
+                            WallpaperSwatch {
+                                width: 100px;
+                                selected: root.current-term-wallpaper == "builtin:ms";
+                                clicked => { root.set-term-wallpaper("builtin:ms"); }
+                                Image {
+                                    width: 100%; height: 100%;
+                                    source: @image-url("../assets/ms.jpg");
+                                    image-fit: cover;
+                                }
+                            }
+                            Text { text: "MS"; font-size: 11px * Theme.panel-font;
+                                   color: Theme.text-secondary; horizontal-alignment: center; }
+                        }
+                        VerticalLayout {
+                            spacing: 5px;
+                            WallpaperSwatch {
+                                width: 100px;
+                                selected: root.current-term-wallpaper == "builtin:miku";
+                                clicked => { root.set-term-wallpaper("builtin:miku"); }
+                                Image {
+                                    width: 100%; height: 100%;
+                                    source: @image-url("../assets/miku.jpg");
+                                    image-fit: cover;
+                                }
+                            }
+                            Text { text: "Miku"; font-size: 11px * Theme.panel-font;
+                                   color: Theme.text-secondary; horizontal-alignment: center; }
+                        }
+                    }
+                }
+                Rectangle { height: 12px; }
+                HorizontalLayout {
+                    spacing: 14px;
+                    alignment: start;
+                    WallpaperSwatch {
+                        selected: root.term-wp-is-custom;
+                        clicked => { root.pick-term-wallpaper-file(); }
+                        if root.term-wp-is-custom : Image {
+                            width: 100%; height: 100%;
+                            source: Theme.term-wallpaper;
+                            image-fit: cover;
+                        }
+                        if !root.term-wp-is-custom : Rectangle {
+                            width: 100%; height: 100%;
+                            background: Theme.bg-elevated;
+                            Text {
+                                text: "\u{E2C6}";
+                                font-family: "Material Icons"; color: Theme.text-secondary;
+                                font-size: 22px * Theme.panel-font;
+                                width: 100%; height: 100%;
+                                horizontal-alignment: center; vertical-alignment: center;
+                            }
+                        }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        spacing: 6px;
+                        Rectangle {
+                            width: 130px; height: 30px;
+                            border-radius: 6px;
+                            background: term-pick-ta.has-hover ? Theme.accent-hover : Theme.accent;
+                            term-pick-ta := TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => { root.pick-term-wallpaper-file(); }
+                            }
+                            Text {
+                                text: root.lang-en ? "Choose file…" : "选择文件…";
+                                color: white; font-size: 12px * Theme.panel-font;
+                                width: 100%; height: 100%;
+                                horizontal-alignment: center; vertical-alignment: center;
+                            }
+                        }
+                        if root.term-wp-is-custom : Text {
+                            text: root.custom-term-wallpaper-name;
+                            color: Theme.text-muted; font-size: 11px * Theme.panel-font;
+                            width: 150px; overflow: elide;
+                        }
+                    }
+                }
+
+                Rectangle { height: 16px; }
                 SectionHeader { text: root.lang-en ? "OVERLAY" : "遮罩"; height: 22px; }
                 SettingRow {
-                    label: root.lang-en ? "Wallpaper transparency" : "壁纸遮罩透明度";
+                    label: root.lang-en ? "Interface transparency" : "界面遮罩透明度";
                     desc: root.lang-en
-                        ? "How much the wallpaper shows through panels and the terminal (no effect without a wallpaper)."
-                        : "壁纸透过面板 / 终端背景的程度,越往右越透;没设壁纸时不生效。";
-                    show-divider: false;
+                        ? "How much the wallpaper shows through chrome panels (no effect without a wallpaper)."
+                        : "壁纸透过侧栏、标签栏等界面面板的程度，越往右越透。";
+                    show-divider: true;
                     HorizontalLayout {
                         spacing: 8px;
                         Slider {
                             width: 150px;
                             minimum: 0;
-                            // Up to 70% transparency (overlay floor 0.30).
                             maximum: 70;
                             value: (1.0 - root.wallpaper-overlay) * 100;
                             changed(v) => { root.wallpaper-overlay = 1.0 - v / 100; }
@@ -1192,6 +1389,31 @@ export component InterfacePanel inherits Rectangle {
                         }
                         Text {
                             text: "\{round((1.0 - root.wallpaper-overlay) * 100)}%";
+                            color: Theme.text-secondary;
+                            font-size: 12px * Theme.panel-font;
+                            vertical-alignment: center;
+                            width: 34px;
+                        }
+                    }
+                }
+                SettingRow {
+                    label: root.lang-en ? "Terminal transparency" : "终端遮罩透明度";
+                    desc: root.lang-en
+                        ? "How much wallpaper shows through the terminal pane. Independent of the interface slider."
+                        : "壁纸透过终端区域的程度，与界面遮罩分开调节。跟随界面壁纸或单独终端壁纸时都生效。";
+                    show-divider: false;
+                    HorizontalLayout {
+                        spacing: 8px;
+                        Slider {
+                            width: 150px;
+                            minimum: 0;
+                            maximum: 70;
+                            value: (1.0 - root.term-wallpaper-overlay) * 100;
+                            changed(v) => { root.term-wallpaper-overlay = 1.0 - v / 100; }
+                            released(v) => { root.persist-term-wallpaper-overlay(1.0 - v / 100); }
+                        }
+                        Text {
+                            text: "\{round((1.0 - root.term-wallpaper-overlay) * 100)}%";
                             color: Theme.text-secondary;
                             font-size: 12px * Theme.panel-font;
                             vertical-alignment: center;
@@ -1301,6 +1523,26 @@ export component InterfacePanel inherits Rectangle {
                 spacing: 0;
                 alignment: start;
                 SectionHeader { text: "SFTP"; height: 24px; }
+                SettingRow {
+                    label: root.lang-en ? "Filename size" : "文件名字号";
+                    desc: root.lang-en
+                        ? "Pixel size for file and folder names in the SFTP list (was 15px)."
+                        : "SFTP 列表里文件名 / 文件夹名的像素字号（原先 15px）。";
+                    Stepper {
+                        value: root.sftp-list-px; minimum: 10; maximum: 22; step: 1; unit: "px";
+                        changed(v) => { root.sftp-list-px = v; root.set-sftp-list-px(v); }
+                    }
+                }
+                SettingRow {
+                    label: root.lang-en ? "Column header size" : "列标题字号";
+                    desc: root.lang-en
+                        ? "Pixel size for Name / Size / Type and other column titles (was 13px)."
+                        : "名称、大小、类型等列标题的像素字号（原先 13px）。";
+                    Stepper {
+                        value: root.sftp-header-px; minimum: 10; maximum: 20; step: 1; unit: "px";
+                        changed(v) => { root.sftp-header-px = v; root.set-sftp-header-px(v); }
+                    }
+                }
                 SettingRow {
                     label: root.lang-en ? "SFTP follows terminal cd" : "SFTP 跟随 cd 更新";
                     desc: root.lang-en

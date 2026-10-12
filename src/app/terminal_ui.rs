@@ -358,6 +358,46 @@ pub(super) fn apply_wallpaper(
     }
 }
 
+/// Wallpaper that covers only the terminal pane. Does not retint the chrome.
+/// `""` follows the window wallpaper; `"none"` uses a solid terminal background.
+pub(super) fn apply_term_wallpaper(window: &AppWindow, id: &str) {
+    window.set_current_term_wallpaper(id.into());
+    if id.is_empty() {
+        window.set_term_wallpaper_own(false);
+        window.set_term_wallpaper_none(false);
+        window.set_custom_term_wallpaper_name("".into());
+        return;
+    }
+    if id == "none" {
+        window.set_term_wallpaper_own(false);
+        window.set_term_wallpaper_none(true);
+        window.set_custom_term_wallpaper_name("".into());
+        return;
+    }
+    match crate::wallpaper::load(id) {
+        Some(wp) => {
+            window.set_term_wallpaper_img(wp.image);
+            window.set_term_wallpaper_own(true);
+            window.set_term_wallpaper_none(false);
+            let name = if crate::wallpaper::is_builtin(id) {
+                String::new()
+            } else {
+                std::path::Path::new(id)
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default()
+            };
+            window.set_custom_term_wallpaper_name(name.into());
+        }
+        None => {
+            window.set_term_wallpaper_own(false);
+            window.set_term_wallpaper_none(false);
+            window.set_current_term_wallpaper("".into());
+            window.set_custom_term_wallpaper_name("".into());
+        }
+    }
+}
+
 /// Resolve which interface drives the top sparkline: the user's selection if it
 /// still exists, otherwise the busiest (the list is sorted busiest-first).
 /// Returns (name, rx_bps, tx_bps).

@@ -234,6 +234,9 @@ msgstr "权限"
 msgid "Copy path"
 msgstr "复制路径"
 
+msgid "CD in terminal"
+msgstr "终端进入此目录"
+
 msgid "Copy file"
 msgstr "复制文件"
 
@@ -248,6 +251,15 @@ msgstr "复制到会话..."
 
 msgid "Refresh"
 msgstr "刷新"
+
+msgid "Commands"
+msgstr "命令"
+
+msgid "Manage"
+msgstr "管理"
+
+msgid "default"
+msgstr "默认分类"
 
 msgid "New folder"
 msgstr "新建文件夹"
