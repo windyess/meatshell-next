@@ -90,20 +90,28 @@ open /Applications/meatshell.app
 - [x] FinalShell-style UI with dark / light / follow-system themes
 - [x] Local + remote resource monitoring (CPU / memory / swap / network / disk)
 - [x] Remote process monitor (CPU-sorted table with PID copy and permission-aware termination)
-- [x] Full VT/ANSI terminal emulation (btop / htop / vim render correctly)
+- [x] Full VT/ANSI terminal emulation (btop / htop / vim render correctly), including underlines and a system-font fallback for glyphs missing from the terminal font
 - [x] Color emoji, including skin tones, flags, and ZWJ sequences
+- [x] Wallpaper: separate images for the UI and the terminal, with adjustable overlay opacity
+- [x] Always-on-top pin in the top-right toolbar (per window, not persisted)
 - [x] Tabs (welcome page + multiple sessions)
 - [x] Session management: create / edit / delete / groups, local JSON, export / import (including FinalShell connection files)
   - Config location: `%APPDATA%/meatshell/sessions.json` (Windows)
     / `~/.config/meatshell/sessions.json` (Linux)
     / `~/Library/Application Support/meatshell/sessions.json` (macOS)
-- [x] SSH (`russh`, pure Rust): password / private key / encrypted key (passphrase)
-- [x] SFTP browser + upload / download (drag-and-drop) + in-terminal ZMODEM (`sz` download / `rz` multi-file upload) + context-menu Copy / Paste (remote `cp -a`)
+- [x] Quick Connect sidebar: unpinned, it auto-hides when you click the terminal/tabs, connect a session, or switch to another window; the header pin keeps it open and the choice is saved
+- [x] SSH (`russh`, pure Rust): password / private key / encrypted key (passphrase) / PuTTY and MobaXterm PPK
+- [x] Multi-hop SSH jump hosts (shared by the terminal, SFTP, and automation), with add / remove / drag-reorder in the session editor
+- [x] Per-session character encoding for SSH / Telnet / serial (including GBK and GB18030)
+- [x] SFTP browser + upload / download (drag-and-drop) + in-terminal ZMODEM (`sz` download / `rz` multi-file upload)
+  - Ctrl/Shift multi-select, resizable columns, pixel font size; context-menu Copy / Paste (remote `cp -a`) and Compress as ZIP
+  - Pause, resume, or cancel one or all transfers; double-click a file to download it to the default folder and open it
 - [x] SSH port forwarding / tunnels: local -L / remote -R / dynamic -D (SOCKS5)
   - The connected session's Tunnels panel can add, stop, restart, and delete forwards. Rules can be saved to the SSH session with optional automatic startup on reconnect.
+- [x] Session logging: optional per-tab ANSI-stripped plain-text logs, with a global switch and per-session override
 - [x] System tray: closing the main window keeps sessions running; restore or create a window from the tray, or choose Quit to exit.
 - [x] Quick commands + command box (broadcast to all sessions) + command history
-- [x] Serial / Telnet sessions
+- [x] Serial / Telnet sessions (serial ports can be picked from those detected on this machine)
 - [x] RDP remote desktop: stores host / port / user / password / domain with a resolution choice (full screen / common sizes / custom) and hands the session to a remote desktop client (`mstsc` on Windows; FreeRDP's `xfreerdp3` / `xfreerdp` on Linux / macOS — install it yourself, or use the Flatpak build, which bundles it)
 - [x] Outbound proxy (SOCKS5 / HTTP)
 - [x] Import `~/.ssh/config`

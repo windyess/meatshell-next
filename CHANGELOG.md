@@ -5,12 +5,22 @@ All notable changes are documented here. 本文件记录所有重要变更。
 
 ## Unreleased
 
+## [0.7.9] - 2026-10-13
+
 - **快速连接未固定时自动收起。** 侧栏标题栏增加固定按钮。未固定时，单击终端/标签区域、连接会话，或切到其他窗口，都会收起快速连接；固定后保持展开。
 - **Auto-hide unpinned Quick Connect.** The sidebar header has a pin button. Unpinned, it collapses when you click the terminal/tab area, connect a session, or switch to another window; pinned, it stays open.
 
+- **SFTP 传输可暂停、继续、取消；双击文件下载后用系统程序打开。** 传输列表支持单项或全部暂停/继续，以及取消未完成任务。
+- **SFTP transfers can be paused, resumed, or cancelled; double-click downloads a file and opens it.**
+
+- **SFTP 列表支持 Ctrl/Shift 多选、拖拽列宽、按像素调字号；右键可压缩为 zip。**
+- **SFTP list: Ctrl/Shift multi-select, resizable columns, pixel font size, and Compress as ZIP.**
+
+- **终端可独立设置壁纸，并放开界面/终端遮罩透明度上限。**
+- **Separate terminal wallpaper, with overlay opacity no longer capped at 70%.**
+
 - **加快日常编译。** `cargo run` 的依赖不再带完整 debug 信息；新增 `release-fast` 配置（无 LTO）和 `cargo run-fast` 别名。Windows 链接改用自带的 rust-lld。发版仍用原来的 `--release`。
 - **Faster local builds.** Dev-profile dependencies no longer carry full debug info; add a `release-fast` profile (no LTO) and a `cargo run-fast` alias. Windows links with the bundled rust-lld. Shipping still uses `--release`.
-
 
 - **SFTP 右键菜单支持复制 / 粘贴。** 复制会记下远端路径；粘贴向当前 SSH 会话注入 `cp -a -- …` 命令（路径按 POSIX 单引号转义）。同一目录粘贴会写成 `name.copy`，避免 “are the same file”。约 0.8 秒后刷新文件列表。
 - **SFTP context menu Copy / Paste.** Copy stages remote paths; Paste injects `cp -a -- …` into the current SSH session (POSIX-quoted). Pasting into the same directory uses `name.copy` so GNU cp does not fail with “are the same file”. The file list refreshes after about 0.8s.

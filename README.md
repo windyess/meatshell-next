@@ -85,20 +85,28 @@ open /Applications/meatshell.app
 - [x] FinalShell 风格 UI，深色 / 浅色 / 跟随系统主题
 - [x] 本机 + 远端资源监控（CPU / 内存 / 交换 / 网络 / 磁盘）
 - [x] 远端进程监控（按 CPU 排序、PID 复制与权限确认后结束进程）
-- [x] 完整 VT/ANSI 终端模拟（btop / htop / vim 全屏正常渲染）
+- [x] 完整 VT/ANSI 终端模拟（btop / htop / vim 全屏正常渲染），支持下划线及终端字体缺字时的系统字体回退
 - [x] 彩色 emoji（支持肤色、旗帜及 ZWJ 组合序列）
+- [x] 壁纸：界面与终端可分别设置，遮罩透明度可调
+- [x] 窗口置顶：右上角图钉，仅当前窗口生效
 - [x] 多标签页（欢迎页 + 多个会话）
 - [x] 会话管理：新建 / 编辑 / 删除 / 分组，本地 JSON 持久化，导出 / 导入（兼容 FinalShell 连接文件）
   - 配置位置：`%APPDATA%/meatshell/sessions.json`（Windows）
     / `~/.config/meatshell/sessions.json`（Linux）
     / `~/Library/Application Support/meatshell/sessions.json`（macOS）
-- [x] SSH（`russh`，纯 Rust）：密码 / 私钥 / 加密私钥（密码短语）
-- [x] SFTP 文件浏览 + 上传 / 下载（拖拽）+ 终端内 ZMODEM（`sz` 下载 / `rz` 多文件上传）+ 右键复制 / 粘贴（远端 `cp -a`）
+- [x] 快速连接侧栏：未固定时单击终端/标签、连接会话或切到其他窗口会自动收起；标题栏图钉可固定展开，状态会保存
+- [x] SSH（`russh`，纯 Rust）：密码 / 私钥 / 加密私钥（密码短语）/ PuTTY·MobaXterm PPK
+- [x] 多级 SSH 跳板（终端 / SFTP / 自动化共用），会话编辑器可增删与拖拽排序
+- [x] 按会话设置字符编码（SSH / Telnet / 串口，含 GBK、GB18030 等）
+- [x] SFTP 文件浏览 + 上传 / 下载（拖拽）+ 终端内 ZMODEM（`sz` 下载 / `rz` 多文件上传）
+  - 列表支持 Ctrl/Shift 多选、拖拽列宽、按像素调字号；右键复制/粘贴（远端 `cp -a`）、压缩为 zip
+  - 传输可单项或全部暂停、继续、取消；双击文件会下载到默认目录并用系统程序打开
 - [x] SSH 端口转发 / 隧道：本地 -L / 远程 -R / 动态 -D（SOCKS5）
   - 连接后的 Tunnel 面板可新建、停止、重新启动和删除转发；可保存到当前 SSH 会话，并选择下次连接时是否自动启用。
+- [x] 会话日志：按标签页记录去掉 ANSI 的纯文本日志，可全局开启或按会话覆盖
 - [x] 系统托盘：关闭主窗口后会话继续运行；从托盘恢复或新建窗口，选择“退出”才结束程序。
 - [x] 快捷命令 + 命令输入框（可群发到所有会话）+ 命令历史
-- [x] 串口 / Telnet 会话
+- [x] 串口 / Telnet 会话（串口可从本机已检测到的端口中选择）
 - [x] RDP 远程桌面：只保存主机 / 端口 / 用户名 / 密码 / 域，分辨率可选全屏 / 常见分辨率 / 自定义，连接时交给远程桌面客户端（Windows 用系统自带 `mstsc`；Linux / macOS 用 FreeRDP 的 `xfreerdp3` / `xfreerdp`，需自行安装，Flatpak 版已内置）
 - [x] 出站代理（SOCKS5 / HTTP）
 - [x] 导入 `~/.ssh/config`
