@@ -26,7 +26,7 @@ export global Theme {
     in-out property <bool>  term-wallpaper-none: false;
     in-out property <color> wp-accent: #4a90e2;   // vivid accent from the image
     in-out property <color> wp-tint:   #808080;   // average colour, tints surfaces
-    // Frosted-panel opacity over a wallpaper (0.30–1.00). User-adjustable via the
+    // Frosted-panel opacity over a wallpaper (0.0–1.00). User-adjustable via the
     // Interface › Wallpaper opacity slider; bg-root / term-bg derive from it so one
     // control scales the whole wallpaper wash. Default 0.85 (15% transparency).
     in-out property <float> panel-alpha: 0.85;
@@ -106,7 +106,9 @@ export global Theme {
         : ((root.term-wallpaper-own || root.wallpaper-active)
             ? base-term-bg.with-alpha(max(0.0, root.term-alpha - 0.14))
             : base-term-bg);
-    out property <brush> term-fg: dark ? #d4d4d4 : #2d2d2f;
+    // Default text colour; Rust may override when the user picks a custom
+    // terminal font colour in Settings → Font.
+    in-out property <brush> term-fg: dark ? #d4d4d4 : #2d2d2f;
 
     // True on macOS (set by Rust). App shortcuts use Cmd (⌘) here instead of
     // Ctrl, so the physical Ctrl key stays free for the shell (^C/^X…) (#158).

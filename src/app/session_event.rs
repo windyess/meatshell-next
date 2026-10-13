@@ -225,36 +225,41 @@ pub(super) fn apply_session_event_to_window(
         SessionEvent::SftpEntries { path, entries } => {
             let mut slint_entries: Vec<SftpEntry> = entries
                 .iter()
-                .map(|e| SftpEntry {
-                    name: e.name.clone().into(),
-                    full_path: e.full_path.clone().into(),
-                    is_dir: e.is_dir,
-                    size: if e.is_dir {
-                        "".into()
-                    } else {
-                        format_size(e.size).into()
-                    },
-                    size_bytes: e.size as f32,
-                    modified: format_mtime(e.modified).into(),
-                    modified_ts: e.modified as f32,
-                    mode: (e.mode & 0o7777) as i32,
-                    file_type: match e.file_type.as_str() {
-                        "directory" => crate::i18n::t("文件夹", "Folder"),
-                        "symlink" => crate::i18n::t("符号链接", "Symbolic link"),
-                        "socket" => crate::i18n::t("套接字", "Socket"),
-                        "block-device" => crate::i18n::t("块设备", "Block device"),
-                        "character-device" => crate::i18n::t("字符设备", "Character device"),
-                        "fifo" => crate::i18n::t("管道", "FIFO"),
-                        _ => crate::i18n::t("文件", "File"),
+                .map(|e| {
+                    let icon_kind =
+                        sftp_entry_icon_kind(&e.name, e.is_dir, &e.file_type, e.mode);
+                    SftpEntry {
+                        name: e.name.clone().into(),
+                        full_path: e.full_path.clone().into(),
+                        is_dir: e.is_dir,
+                        size: if e.is_dir {
+                            "".into()
+                        } else {
+                            format_size(e.size).into()
+                        },
+                        size_bytes: e.size as f32,
+                        modified: format_mtime(e.modified).into(),
+                        modified_ts: e.modified as f32,
+                        mode: (e.mode & 0o7777) as i32,
+                        file_type: match e.file_type.as_str() {
+                            "directory" => crate::i18n::t("文件夹", "Folder"),
+                            "symlink" => crate::i18n::t("符号链接", "Symbolic link"),
+                            "socket" => crate::i18n::t("套接字", "Socket"),
+                            "block-device" => crate::i18n::t("块设备", "Block device"),
+                            "character-device" => crate::i18n::t("字符设备", "Character device"),
+                            "fifo" => crate::i18n::t("管道", "FIFO"),
+                            _ => crate::i18n::t("文件", "File"),
+                        }
+                        .into(),
+                        permissions: crate::ssh::format_permissions(e.permissions_mode).into(),
+                        permissions_mode: e.permissions_mode as i32,
+                        // Unresolved owner/group stay blank instead of flashing the
+                        // raw uid/gid numbers — names land on the follow-up paint.
+                        owner: e.owner.clone().unwrap_or_default().into(),
+                        group: e.group.clone().unwrap_or_default().into(),
+                        selected: false,
+                        icon_kind,
                     }
-                    .into(),
-                    permissions: crate::ssh::format_permissions(e.permissions_mode).into(),
-                    permissions_mode: e.permissions_mode as i32,
-                    // Unresolved owner/group stay blank instead of flashing the
-                    // raw uid/gid numbers — names land on the follow-up paint.
-                    owner: e.owner.clone().unwrap_or_default().into(),
-                    group: e.group.clone().unwrap_or_default().into(),
-                    selected: false,
                 })
                 .collect();
             let (sort_key, sort_dir) = (0..terminals.row_count())
@@ -382,6 +387,8 @@ pub(super) fn apply_session_event_to_window(
                 3 => t("文件准备中", "Preparing...").to_string(),
                 // User-cancelled transfer (#100).
                 4 => t("已取消", "Cancelled").to_string(),
+                // Paused via Pause All.
+                5 => t("已暂停", "Paused").to_string(),
                 _ => {
                     if total > 0 {
                         format!("{}/{}", format_size(transferred), format_size(total))
@@ -424,8 +431,8 @@ pub(super) fn apply_session_event_to_window(
                     None => model.insert(0, rec), // newest at top
                 }
                 // Drive the breathing indicator on the Transfers toolbar button:
-                // `true` while any row is active (0) or preparing (3); flips back
-                // to `false` the moment the last transfer finishes (#breathing-light).
+                // `true` while any row is active (0) or preparing (3). Paused (5)
+                // does not breathe — nothing is moving until Resume All.
                 let has_active = (0..model.row_count()).any(|i| {
                     model
                         .row_data(i)

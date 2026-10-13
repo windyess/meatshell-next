@@ -16,6 +16,7 @@ fn sftp_entry(name: &str, is_dir: bool) -> SftpEntry {
         owner: String::new().into(),
         group: String::new().into(),
         selected: false,
+        icon_kind: if is_dir { "folder" } else { "file" }.into(),
     }
 }
 

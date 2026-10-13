@@ -656,13 +656,7 @@ const ANSI16_LIGHT_BG: [(u8, u8, u8); 16] = [
 /// ≥ 0.55) are darkened so they remain readable on a near-white background.
 fn vt_color_to_slint(color: vt100::Color, bold: bool, is_dark: bool) -> slint::Color {
     let (r, g, b) = match color {
-        vt100::Color::Default => {
-            if is_dark {
-                (0xd4, 0xd4, 0xd4)
-            } else {
-                (0x2d, 0x2d, 0x2f)
-            }
-        }
+        vt100::Color::Default => vt_default_fg_rgb(is_dark),
         vt100::Color::Idx(i) => idx_to_rgb(i, bold, is_dark),
         vt100::Color::Rgb(r, g, b) => {
             if is_dark {
@@ -675,7 +669,30 @@ fn vt_color_to_slint(color: vt100::Color, bold: bool, is_dark: bool) -> slint::C
     slint::Color::from_rgb_u8(r, g, b)
 }
 
+/// Optional override for the terminal's default (unstyled) foreground colour.
+/// `None` follows the light/dark theme defaults. Set from Settings → Font.
+static DEFAULT_FG_OVERRIDE: std::sync::Mutex<Option<(u8, u8, u8)>> =
+    std::sync::Mutex::new(None);
+
+pub(crate) fn set_default_fg_override(rgb: Option<(u8, u8, u8)>) {
+    if let Ok(mut slot) = DEFAULT_FG_OVERRIDE.lock() {
+        *slot = rgb;
+    }
+}
+
+pub(crate) fn has_default_fg_override() -> bool {
+    DEFAULT_FG_OVERRIDE
+        .lock()
+        .map(|slot| slot.is_some())
+        .unwrap_or(false)
+}
+
 fn vt_default_fg_rgb(is_dark: bool) -> (u8, u8, u8) {
+    if let Ok(slot) = DEFAULT_FG_OVERRIDE.lock() {
+        if let Some(rgb) = *slot {
+            return rgb;
+        }
+    }
     if is_dark {
         (0xd4, 0xd4, 0xd4)
     } else {

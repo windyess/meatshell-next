@@ -258,6 +258,7 @@ fn fresh_config() -> ConfigFile {
         welcome_as_sidebar: true,
         sidebar_dock: "right".to_string(),
         wallpaper_overlay: DEFAULT_WALLPAPER_OVERLAY,
+        term_wallpaper_overlay: -1.0,
         defaults_rev: DEFAULTS_REV,
         ..ConfigFile::default()
     }
@@ -304,6 +305,17 @@ fn migrate_defaults(cfg: &mut ConfigFile) -> bool {
         && (cfg.wallpaper_overlay - PREVIOUS_DEFAULT_WALLPAPER_OVERLAY).abs() < 0.005
     {
         cfg.wallpaper_overlay = DEFAULT_WALLPAPER_OVERLAY;
+    }
+    // rev 4: allow full transparency (alpha 0). Legacy term `0.0` meant "follow
+    // interface overlay"; remap to -1 so 0 can mean fully clear. Materialize any
+    // leftover unset wallpaper overlay (old getter treated ≤0 as default).
+    if cfg.defaults_rev < 4 {
+        if cfg.term_wallpaper_overlay == 0.0 {
+            cfg.term_wallpaper_overlay = -1.0;
+        }
+        if cfg.wallpaper_overlay <= 0.0 {
+            cfg.wallpaper_overlay = DEFAULT_WALLPAPER_OVERLAY;
+        }
     }
     cfg.defaults_rev = DEFAULTS_REV;
     true
@@ -916,6 +928,22 @@ impl ConfigStore {
         true
     }
 
+    pub fn terminal_fg_color(&self) -> &str {
+        if normalize_hex_color(&self.cache.terminal_fg_color).is_some() {
+            &self.cache.terminal_fg_color
+        } else {
+            ""
+        }
+    }
+
+    pub fn set_terminal_fg_color(&mut self, color: &str) -> bool {
+        let Some(normalized) = normalize_hex_color(color) else {
+            return false;
+        };
+        self.cache.terminal_fg_color = normalized;
+        true
+    }
+
     /// Whether client-side highlighting of otherwise unstyled output is active.
     pub fn output_highlight_enabled(&self) -> bool {
         !self.cache.output_highlight_disabled
@@ -1351,29 +1379,24 @@ impl ConfigStore {
         self.cache.mcp_allow_file_transfers = enabled;
     }
     pub fn wallpaper_overlay(&self) -> f32 {
-        let a = self.cache.wallpaper_overlay;
-        // Floor lowered 0.40 -> 0.30 so more see-through panels are reachable.
-        if a <= 0.0 {
-            DEFAULT_WALLPAPER_OVERLAY
-        } else {
-            a.clamp(0.30, 1.0)
-        }
+        self.cache.wallpaper_overlay.clamp(0.0, 1.0)
     }
     pub fn set_wallpaper_overlay(&mut self, v: f32) {
-        self.cache.wallpaper_overlay = v.clamp(0.30, 1.0);
+        self.cache.wallpaper_overlay = v.clamp(0.0, 1.0);
     }
 
     pub fn term_wallpaper_overlay(&self) -> f32 {
         let a = self.cache.term_wallpaper_overlay;
-        if a <= 0.0 {
+        // Negative sentinel = follow interface overlay (rev 4; was `0.0` before).
+        if a < 0.0 {
             self.wallpaper_overlay()
         } else {
-            a.clamp(0.30, 1.0)
+            a.clamp(0.0, 1.0)
         }
     }
 
     pub fn set_term_wallpaper_overlay(&mut self, v: f32) {
-        self.cache.term_wallpaper_overlay = v.clamp(0.30, 1.0);
+        self.cache.term_wallpaper_overlay = v.clamp(0.0, 1.0);
     }
     pub fn panel_font(&self) -> u32 {
         if self.cache.panel_font == 0 {
@@ -2417,6 +2440,28 @@ mod tests {
         };
         assert!(migrate_defaults(&mut custom));
         assert!((custom.wallpaper_overlay - 0.70).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn overlay_allows_full_transparency_and_remaps_term_follow_sentinel() {
+        let mut legacy = ConfigFile {
+            wallpaper_overlay: 0.85,
+            term_wallpaper_overlay: 0.0, // old "follow" sentinel
+            defaults_rev: 3,
+            ..ConfigFile::default()
+        };
+        assert!(migrate_defaults(&mut legacy));
+        assert!((legacy.term_wallpaper_overlay - (-1.0)).abs() < f32::EPSILON);
+
+        let mut store = temp_store();
+        store.set_wallpaper_overlay(0.0);
+        assert!((store.wallpaper_overlay() - 0.0).abs() < f32::EPSILON);
+        store.set_term_wallpaper_overlay(0.0);
+        assert!((store.term_wallpaper_overlay() - 0.0).abs() < f32::EPSILON);
+
+        store.cache.term_wallpaper_overlay = -1.0;
+        store.set_wallpaper_overlay(0.55);
+        assert!((store.term_wallpaper_overlay() - 0.55).abs() < f32::EPSILON);
     }
 
     #[test]

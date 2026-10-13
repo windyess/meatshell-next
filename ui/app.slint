@@ -42,9 +42,9 @@ export { SessionInfo, SessionDraft, JumpHop, TabInfo, SftpEntry, SftpTreeNode, T
 export struct TransferInfo {
     id: string,
     name: string,
-    detail: string,   // "2.3 MB/5.0 MB" | "已完成" | "失败"
+    detail: string,   // "2.3 MB/5.0 MB" | "已完成" | "失败" | "已暂停"
     percent: float,   // 0.0..1.0
-    state: int,       // 0 active / 1 done / 2 error
+    state: int,       // 0 active / 1 done / 2 error / 3 preparing / 4 cancelled / 5 paused
     is-upload: bool,
 }
 
@@ -559,6 +559,9 @@ export component AppWindow inherits Window {
     in-out property <string> term-cursor-style: "block";
     in-out property <string> term-cursor-color-hex: root.dark-mode ? "#D4D4D4" : "#2D2D2F";
     in-out property <color> term-cursor-color: Theme.term-fg;
+    in-out property <string> term-fg-color-hex: root.dark-mode ? "#D4D4D4" : "#2D2D2F";
+    in-out property <color> term-fg-color: Theme.term-fg;
+    in-out property <brush> term-fg <=> Theme.term-fg;
     in-out property <bool> output-highlight-enabled: true;
     in-out property <bool> json-format-output: true;
     in-out property <string> output-highlight-preset: "log";
@@ -588,7 +591,7 @@ export component AppWindow inherits Window {
     in-out property <bool> term-wallpaper-none <=> Theme.term-wallpaper-none;
     in-out property <color> wp-accent <=> Theme.wp-accent;
     in-out property <color> wp-tint <=> Theme.wp-tint;
-    // User-adjustable wallpaper overlay opacity (0.30–1.00), persisted.
+    // User-adjustable wallpaper overlay opacity (0.0–1.00), persisted.
     in-out property <float> wallpaper-overlay <=> Theme.panel-alpha;
     callback persist-wallpaper-overlay(float);
     in-out property <float> term-wallpaper-overlay <=> Theme.term-alpha;
@@ -634,6 +637,7 @@ export component AppWindow inherits Window {
     callback set-term-font-bold(bool);             // apply + persist bold terminal text
     callback set-term-cursor-style(string);        // apply + persist cursor shape (#275)
     callback set-term-cursor-color(string) -> bool;// validate + persist cursor colour (#275)
+    callback set-term-fg-color(string) -> bool;    // validate + persist default text colour
     callback set-output-highlight(bool, string);   // enable + built-in preset
     callback set-json-format-output(bool);
     callback add-output-highlight-rule(string, bool, bool, bool, string) -> bool;
@@ -814,6 +818,10 @@ export component AppWindow inherits Window {
     callback open-download-dir();            // reveal the folder in the OS
     callback clear-transfers();              // wipe the transfer history
     callback cancel-transfer(string);        // cancel an in-progress transfer by id (#100)
+    callback pause-transfer(string);         // pause one active transfer by id
+    callback resume-transfer(string);        // resume one paused transfer by id
+    callback pause-all-transfers();          // pause every active transfer
+    callback resume-all-transfers();         // resume every paused transfer
     callback set-language(string);           // switch UI language ("zh" / "en")
 
     // --- Update check (#48) ------------------------------------------------
@@ -1137,6 +1145,7 @@ export component AppWindow inherits Window {
     callback sftp-navigate(string /* tab-id */, string /* path */);
     // Trigger a download: Rust opens a save-folder dialog then transfers.
     callback sftp-download(string /* tab-id */, string /* remote-path */);
+    callback sftp-download-and-open(string /* tab-id */, string /* remote-path */);
     // Trigger an upload: Rust opens a file-picker dialog then transfers.
     callback sftp-upload-clicked(string /* tab-id */, string /* remote-dir */, bool /* folder */);
     // Refresh the current directory listing.
@@ -2094,6 +2103,7 @@ export component AppWindow inherits Window {
                         terminal-resize(w, h) => { root.terminal-resize(term.id, w, h) }
                         sftp-navigate(path) => { root.sftp-navigate(term.id, path); }
                         sftp-download(path) => { root.sftp-download(term.id, path); }
+                        sftp-download-and-open(path) => { root.sftp-download-and-open(term.id, path); }
                         sftp-upload-clicked(dir, folder) => { root.sftp-upload-clicked(term.id, dir, folder); }
                         sftp-refresh(path) => { root.sftp-refresh(term.id, path); }
                         sftp-tree-expand(path) => { root.sftp-tree-expand(term.id, path); }
@@ -3245,12 +3255,35 @@ export component AppWindow inherits Window {
 
                 // Transfer records (download/upload progress + history).
                 HorizontalLayout {
+                    spacing: 4px;
                     Text {
                         text: @tr("Transfers");
                         color: Theme.text-secondary;
                         font-size: Theme.fs-sm;
                         horizontal-stretch: 1;
                         vertical-alignment: center;
+                    }
+                    Rectangle {
+                        width: 64px; height: 20px;
+                        border-radius: Theme.radius-sm;
+                        background: pause-all-ta.has-hover ? Theme.bg-hover : transparent;
+                        pause-all-ta := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => { root.pause-all-transfers(); }
+                        }
+                        Text { text: @tr("Pause all"); color: Theme.text-muted; font-size: Theme.fs-xs;
+                               horizontal-alignment: center; vertical-alignment: center; }
+                    }
+                    Rectangle {
+                        width: 64px; height: 20px;
+                        border-radius: Theme.radius-sm;
+                        background: resume-all-ta.has-hover ? Theme.bg-hover : transparent;
+                        resume-all-ta := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => { root.resume-all-transfers(); }
+                        }
+                        Text { text: @tr("Start all"); color: Theme.text-muted; font-size: Theme.fs-xs;
+                               horizontal-alignment: center; vertical-alignment: center; }
                     }
                     Rectangle {
                         width: 44px; height: 20px;
@@ -3308,14 +3341,48 @@ export component AppWindow inherits Window {
                                         text: t.detail;
                                         color: t.state == 2 ? Theme.danger
                                              : t.state == 1 ? Theme.success
+                                             : t.state == 5 ? Theme.warning
                                              : Theme.text-muted;
                                         font-size: Theme.fs-xs;
                                         vertical-alignment: center;
                                     }
-                                    // Cancel button — only while the transfer is
-                                    // active (0) or preparing (3) (#100).
+                                    // Pause — while active or preparing.
                                     if t.state == 0 || t.state == 3 : Rectangle {
-                                        width: 16px; height: 16px;
+                                        width: 36px; height: 18px;
+                                        border-radius: Theme.radius-sm;
+                                        background: pause-ta.has-hover ? Theme.bg-hover : transparent;
+                                        pause-ta := TouchArea {
+                                            mouse-cursor: pointer;
+                                            clicked => { root.pause-transfer(t.id); }
+                                        }
+                                        Text {
+                                            text: @tr("Pause");
+                                            color: pause-ta.has-hover ? Theme.text-primary : Theme.text-muted;
+                                            font-size: Theme.fs-xs;
+                                            horizontal-alignment: center;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+                                    // Continue — while paused.
+                                    if t.state == 5 : Rectangle {
+                                        width: 36px; height: 18px;
+                                        border-radius: Theme.radius-sm;
+                                        background: resume-ta.has-hover ? Theme.bg-hover : transparent;
+                                        resume-ta := TouchArea {
+                                            mouse-cursor: pointer;
+                                            clicked => { root.resume-transfer(t.id); }
+                                        }
+                                        Text {
+                                            text: @tr("Resume");
+                                            color: resume-ta.has-hover ? Theme.text-primary : Theme.text-muted;
+                                            font-size: Theme.fs-xs;
+                                            horizontal-alignment: center;
+                                            vertical-alignment: center;
+                                        }
+                                    }
+                                    // Cancel — unfinished: active / preparing / paused.
+                                    if t.state == 0 || t.state == 3 || t.state == 5 : Rectangle {
+                                        width: 36px; height: 18px;
                                         border-radius: Theme.radius-sm;
                                         background: cancel-ta.has-hover ? Theme.danger.with-alpha(0.18) : transparent;
                                         cancel-ta := TouchArea {
@@ -3323,10 +3390,9 @@ export component AppWindow inherits Window {
                                             clicked => { root.cancel-transfer(t.id); }
                                         }
                                         Text {
-                                            text: "\u{E5CD}"; // close
-                                            font-family: "Material Icons";
+                                            text: @tr("Cancel");
                                             color: cancel-ta.has-hover ? Theme.danger : Theme.text-muted;
-                                            font-size: Theme.fs-sm;
+                                            font-size: Theme.fs-xs;
                                             horizontal-alignment: center;
                                             vertical-alignment: center;
                                         }
@@ -3343,6 +3409,7 @@ export component AppWindow inherits Window {
                                         border-radius: 2px;
                                         background: t.state == 2 ? Theme.danger
                                                   : t.state == 1 ? Theme.success
+                                                  : t.state == 5 ? Theme.warning
                                                   : Theme.accent;
                                     }
                                 }
@@ -5234,6 +5301,8 @@ export component AppWindow inherits Window {
                     term-cursor-style <=> root.term-cursor-style;
                     term-cursor-color-hex <=> root.term-cursor-color-hex;
                     term-cursor-color: root.term-cursor-color;
+                    term-fg-color-hex <=> root.term-fg-color-hex;
+                    term-fg-color: root.term-fg-color;
                     output-highlight-enabled <=> root.output-highlight-enabled;
                     json-format-output <=> root.json-format-output;
                     output-highlight-preset <=> root.output-highlight-preset;
@@ -5283,6 +5352,7 @@ export component AppWindow inherits Window {
                     set-term-font-bold(v) => { root.set-term-font-bold(v); }
                     set-term-cursor-style(v) => { root.set-term-cursor-style(v); }
                     set-term-cursor-color(v) => { root.set-term-cursor-color(v) }
+                    set-term-fg-color(v) => { root.set-term-fg-color(v) }
                     set-output-highlight(enabled, preset) => {
                         root.set-output-highlight(enabled, preset);
                     }

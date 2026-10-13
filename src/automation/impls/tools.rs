@@ -109,6 +109,7 @@ async fn download_file(arguments: &Value, frontend: Frontend) -> Result<Value> {
             remote: remote_path.to_string(),
             local_dir: local_directory.to_string_lossy().into_owned(),
             conflict: crate::sftp::DownloadConflict::Replace,
+            open_after: false,
         },
         false,
         timeout,

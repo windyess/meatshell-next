@@ -98,6 +98,62 @@ pub(super) fn wire_sftp_callbacks(
         });
     }
 
+    // Double-click: download into the configured download dir, then open with
+    // the OS default app (same path rules as a normal download — not temp).
+    {
+        let sftp_handles = sftp_handles.clone();
+        let weak = window.as_weak();
+        window.on_sftp_download_and_open(move |tab_id: SharedString, remote_path: SharedString| {
+            let tab_id = tab_id.to_string();
+            let remote_path = remote_path.to_string();
+            let owner = weak
+                .upgrade()
+                .map(|w| DialogOwner::of(w.window()))
+                .unwrap_or_default();
+            let (preset, always_ask) = weak
+                .upgrade()
+                .map(|w| {
+                    (
+                        w.get_download_dir().to_string(),
+                        w.get_download_always_ask(),
+                    )
+                })
+                .unwrap_or_default();
+            if !always_ask && !preset.is_empty() {
+                if let Ok(handles) = sftp_handles.lock() {
+                    if let Some(h) = handles.get(&tab_id) {
+                        if let Some(conflict) =
+                            choose_download_conflict(owner, &remote_path, &preset)
+                        {
+                            h.download_and_open(remote_path, preset, conflict);
+                        }
+                        if let Some(w) = weak.upgrade() {
+                            w.set_download_open(true);
+                        }
+                    }
+                }
+                return;
+            }
+            let sftp_handles = sftp_handles.clone();
+            let weak = weak.clone();
+            std::thread::spawn(move || {
+                if let Some(dir) = owner.file().pick_folder() {
+                    let local_dir = dir.to_string_lossy().to_string();
+                    if let Ok(handles) = sftp_handles.lock() {
+                        if let Some(h) = handles.get(&tab_id) {
+                            if let Some(conflict) =
+                                choose_download_conflict(owner, &remote_path, &local_dir)
+                            {
+                                h.download_and_open(remote_path, local_dir, conflict);
+                            }
+                        }
+                    }
+                    let _ = weak.upgrade_in_event_loop(|w| w.set_download_open(true));
+                }
+            });
+        });
+    }
+
     // Download a remote file.  If a download folder is preset in settings, save
     // straight there; otherwise fall back to a native folder picker.
     {

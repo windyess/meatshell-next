@@ -34,6 +34,47 @@ use crate::ssh::{format_mtime, format_size, RemoteEntry, RemoteTreeNode, Session
 
 use super::transfer::{DownloadConflict, SftpCommand, SftpHandle};
 
+/// Per-transfer cancel / pause flags shared between the command loop and the
+/// pipelined download/upload tasks.
+#[derive(Default)]
+struct TransferGate {
+    cancel: AtomicBool,
+    pause: AtomicBool,
+}
+
+type TransferGates = Arc<Mutex<HashMap<String, Arc<TransferGate>>>>;
+
+/// Block while `pause` is set. Returns `true` if the transfer was cancelled
+/// (caller should abort). Emits state 5 while paused and state 0 on resume.
+async fn gate_wait(
+    gate: &TransferGate,
+    events: &UnboundedSender<SessionEvent>,
+    id: &str,
+    name: &str,
+    is_upload: bool,
+    transferred: u64,
+    total: u64,
+) -> bool {
+    if gate.cancel.load(Ordering::Relaxed) {
+        return true;
+    }
+    if !gate.pause.load(Ordering::Relaxed) {
+        return false;
+    }
+    emit_transfer(events, id, name, is_upload, transferred, total, 5, "");
+    while gate.pause.load(Ordering::Relaxed) {
+        if gate.cancel.load(Ordering::Relaxed) {
+            return true;
+        }
+        tokio::time::sleep(Duration::from_millis(120)).await;
+    }
+    if gate.cancel.load(Ordering::Relaxed) {
+        return true;
+    }
+    emit_transfer(events, id, name, is_upload, transferred, total, 0, "");
+    false
+}
+
 impl SftpHandle {
     pub fn list_dir(&self, path: String) {
         let _ = self.commands.send(SftpCommand::ListDir(path));
@@ -42,10 +83,28 @@ impl SftpHandle {
         let _ = self.commands.send(SftpCommand::RefreshDir(path));
     }
     pub fn download(&self, remote: String, local_dir: String, conflict: DownloadConflict) {
+        self.download_with_options(remote, local_dir, conflict, false);
+    }
+    pub fn download_and_open(
+        &self,
+        remote: String,
+        local_dir: String,
+        conflict: DownloadConflict,
+    ) {
+        self.download_with_options(remote, local_dir, conflict, true);
+    }
+    fn download_with_options(
+        &self,
+        remote: String,
+        local_dir: String,
+        conflict: DownloadConflict,
+        open_after: bool,
+    ) {
         let _ = self.commands.send(SftpCommand::Download {
             remote,
             local_dir,
             conflict,
+            open_after,
         });
     }
     pub fn download_archive(&self, remote_dir: String, names: Vec<String>, local_dir: String) {
@@ -57,6 +116,18 @@ impl SftpHandle {
     }
     pub fn cancel_transfer(&self, id: String) {
         let _ = self.commands.send(SftpCommand::CancelTransfer(id));
+    }
+    pub fn pause_transfer(&self, id: String) {
+        let _ = self.commands.send(SftpCommand::PauseTransfer(id));
+    }
+    pub fn resume_transfer(&self, id: String) {
+        let _ = self.commands.send(SftpCommand::ResumeTransfer(id));
+    }
+    pub fn pause_all_transfers(&self) {
+        let _ = self.commands.send(SftpCommand::PauseAllTransfers);
+    }
+    pub fn resume_all_transfers(&self) {
+        let _ = self.commands.send(SftpCommand::ResumeAllTransfers);
     }
     pub fn upload(&self, local: PathBuf, remote_dir: String) {
         let _ = self.commands.send(SftpCommand::Upload {
@@ -464,11 +535,10 @@ async fn run_sftp(
         });
     }
 
-    // Per-transfer cancel flags, keyed by transfer id. A download task registers
-    // its flag here; a CancelTransfer command flips it; the task removes it on
-    // exit (#100 cancel download).
-    let cancels: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>> =
-        Arc::new(Mutex::new(HashMap::new()));
+    // Per-transfer cancel/pause gates, keyed by transfer id. A download task
+    // registers here; Cancel / PauseAll / ResumeAll flip the flags; the task
+    // removes its entry on exit.
+    let gates: TransferGates = Arc::new(Mutex::new(HashMap::new()));
 
     // Resolve the home directory and do an initial listing.
     let home = sftp
@@ -637,21 +707,21 @@ async fn run_sftp(
                 remote,
                 local_dir,
                 conflict,
+                open_after,
             } => {
                 // Run on its own task so the command loop stays free to list /
                 // switch directories during the transfer (#116-2).
                 let sftp = sftp.clone();
                 let handle = handle.clone();
                 let events = events.clone();
-                // Register a cancel flag up-front under the file id, so a
-                // CancelTransfer arriving mid-download can flip it (#100).
+                // Register a cancel/pause gate up-front under the file id.
                 let file_id = Uuid::new_v4().to_string();
-                let cancel = Arc::new(AtomicBool::new(false));
-                cancels
+                let gate = Arc::new(TransferGate::default());
+                gates
                     .lock()
                     .unwrap()
-                    .insert(file_id.clone(), cancel.clone());
-                let cancels_done = cancels.clone();
+                    .insert(file_id.clone(), gate.clone());
+                let gates_done = gates.clone();
                 transfers.spawn(async move {
                     // A directory target → recursively mirror the whole tree (#50).
                     let is_dir = sftp
@@ -681,7 +751,11 @@ async fn run_sftp(
                             t("下载文件夹", "Downloading folder"),
                             dirname
                         )));
-                        match download_dir(&sftp, &handle, &remote, &local_dir, &events).await {
+                        match download_dir(
+                            &sftp, &handle, &remote, &local_dir, &events, &gates_done, &gate,
+                        )
+                        .await
+                        {
                             Ok(_) => {
                                 let _ = events.send(SessionEvent::SftpStatus(format!(
                                     "{}: {}",
@@ -721,14 +795,21 @@ async fn run_sftp(
                             &filename,
                             &id,
                             &events,
-                            &cancel,
+                            &gate,
                         )
                         .await
                         {
                             Ok(true) => {
+                                if open_after {
+                                    open_with_os(&local_path_text);
+                                }
                                 let _ = events.send(SessionEvent::SftpStatus(format!(
                                     "{}: {}",
-                                    t("下载完成", "Downloaded"),
+                                    if open_after {
+                                        t("已打开", "Opened")
+                                    } else {
+                                        t("下载完成", "Downloaded")
+                                    },
                                     filename
                                 )));
                             }
@@ -757,7 +838,7 @@ async fn run_sftp(
                             }
                         }
                     }
-                    cancels_done.lock().unwrap().remove(&file_id);
+                    gates_done.lock().unwrap().remove(&file_id);
                 });
             }
 
@@ -772,11 +853,11 @@ async fn run_sftp(
                 let sftp = sftp.clone();
                 let handle = handle.clone();
                 let events = events.clone();
-                // Register a cancel flag up-front so CancelTransfer can flip it (#100).
+                // Register a cancel/pause gate up-front so Cancel / PauseAll can flip it.
                 let id = Uuid::new_v4().to_string();
-                let cancel = Arc::new(AtomicBool::new(false));
-                cancels.lock().unwrap().insert(id.clone(), cancel.clone());
-                let cancels_done = cancels.clone();
+                let gate = Arc::new(TransferGate::default());
+                gates.lock().unwrap().insert(id.clone(), gate.clone());
+                let gates_done = gates.clone();
                 transfers.spawn(async move {
                     let n = names.len();
                     let tmp = format!("/tmp/meatshell-{}.tar", Uuid::new_v4());
@@ -815,11 +896,24 @@ async fn run_sftp(
                     }
                     let _ = &sftp; // listing session kept alive; transfer uses `handle`
                     let res: Result<bool> = async {
+                        // Honour cancel/pause while the remote tar is packing.
+                        while gate.pause.load(Ordering::Relaxed)
+                            && !gate.cancel.load(Ordering::Relaxed)
+                        {
+                            emit_transfer(&events, &id, &arc_name, false, 0, 0, 5, "");
+                            tokio::time::sleep(Duration::from_millis(120)).await;
+                        }
+                        if gate.cancel.load(Ordering::Relaxed) {
+                            return Ok(false);
+                        }
                         let st = exec_remote(&handle, &cmd).await.context("tar on remote")?;
                         if st != 0 {
                             return Err(anyhow!(t("远端 tar 打包失败", "remote tar failed")));
                         }
-                        download_impl(&handle, &tmp, &local_path, &arc_name, &id, &events, &cancel)
+                        if gate.cancel.load(Ordering::Relaxed) {
+                            return Ok(false);
+                        }
+                        download_impl(&handle, &tmp, &local_path, &arc_name, &id, &events, &gate)
                             .await
                     }
                     .await;
@@ -835,6 +929,16 @@ async fn run_sftp(
                             )));
                         }
                         Ok(false) => {
+                            emit_transfer(
+                                &events,
+                                &id,
+                                &arc_name,
+                                false,
+                                0,
+                                0,
+                                4,
+                                t("已取消", "Cancelled"),
+                            );
                             let _ = events.send(SessionEvent::SftpStatus(format!(
                                 "{}: {}",
                                 t("已取消", "Cancelled"),
@@ -849,13 +953,42 @@ async fn run_sftp(
                             )));
                         }
                     }
-                    cancels_done.lock().unwrap().remove(&id);
+                    gates_done.lock().unwrap().remove(&id);
                 });
             }
 
             SftpCommand::CancelTransfer(id) => {
-                if let Some(flag) = cancels.lock().unwrap().get(&id) {
-                    flag.store(true, Ordering::Relaxed);
+                if let Some(gate) = gates.lock().unwrap().get(&id) {
+                    gate.cancel.store(true, Ordering::Relaxed);
+                    gate.pause.store(false, Ordering::Relaxed);
+                }
+            }
+
+            SftpCommand::PauseTransfer(id) => {
+                if let Some(gate) = gates.lock().unwrap().get(&id) {
+                    if !gate.cancel.load(Ordering::Relaxed) {
+                        gate.pause.store(true, Ordering::Relaxed);
+                    }
+                }
+            }
+
+            SftpCommand::ResumeTransfer(id) => {
+                if let Some(gate) = gates.lock().unwrap().get(&id) {
+                    gate.pause.store(false, Ordering::Relaxed);
+                }
+            }
+
+            SftpCommand::PauseAllTransfers => {
+                for gate in gates.lock().unwrap().values() {
+                    if !gate.cancel.load(Ordering::Relaxed) {
+                        gate.pause.store(true, Ordering::Relaxed);
+                    }
+                }
+            }
+
+            SftpCommand::ResumeAllTransfers => {
+                for gate in gates.lock().unwrap().values() {
+                    gate.pause.store(false, Ordering::Relaxed);
                 }
             }
 
@@ -871,15 +1004,14 @@ async fn run_sftp(
                 let events = events.clone();
                 let owner_cache = owner_cache.clone();
                 let names_ready_rx = names_ready_rx.clone();
-                // Register a cancel flag up-front under the file id so a
-                // CancelTransfer arriving mid-upload can flip it (#100).
+                // Register a cancel/pause gate up-front under the file id.
                 let up_id = Uuid::new_v4().to_string();
-                let cancel = Arc::new(AtomicBool::new(false));
-                cancels
+                let gate = Arc::new(TransferGate::default());
+                gates
                     .lock()
                     .unwrap()
-                    .insert(up_id.clone(), cancel.clone());
-                let cancels_done = cancels.clone();
+                    .insert(up_id.clone(), gate.clone());
+                let gates_done = gates.clone();
                 transfers.spawn(async move {
                     // A directory source → recursively upload the whole tree (#50).
                     let is_dir = tokio::fs::metadata(&local)
@@ -897,7 +1029,7 @@ async fn run_sftp(
                                 if let Some(path) = cleanup_after.as_deref() {
                                     cleanup_import_path(path).await;
                                 }
-                                cancels_done.lock().unwrap().remove(&up_id);
+                                gates_done.lock().unwrap().remove(&up_id);
                                 return;
                             }
                         };
@@ -906,7 +1038,10 @@ async fn run_sftp(
                             t("上传文件夹", "Uploading folder"),
                             dirname
                         )));
-                        let res = upload_dir(&handle, &sftp, &local, &remote_dir, &events).await;
+                        let res = upload_dir(
+                            &handle, &sftp, &local, &remote_dir, &events, &gates_done, &gate,
+                        )
+                        .await;
                         if let Ok(entries) = list_dir_impl(&sftp, &remote_dir).await {
                             publish_dir_entries(
                                 &handle,
@@ -944,7 +1079,7 @@ async fn run_sftp(
                                 if let Some(path) = cleanup_after.as_deref() {
                                     cleanup_import_path(path).await;
                                 }
-                                cancels_done.lock().unwrap().remove(&up_id);
+                                gates_done.lock().unwrap().remove(&up_id);
                                 return;
                             }
                         };
@@ -963,7 +1098,7 @@ async fn run_sftp(
                             &filename,
                             &id,
                             &events,
-                            &cancel,
+                            &gate,
                         )
                         .await
                         {
@@ -1025,7 +1160,7 @@ async fn run_sftp(
                     if let Some(path) = cleanup_after.as_deref() {
                         cleanup_import_path(path).await;
                     }
-                    cancels_done.lock().unwrap().remove(&up_id);
+                    gates_done.lock().unwrap().remove(&up_id);
                 });
             }
 
@@ -1039,9 +1174,9 @@ async fn run_sftp(
                     let filename = base_name(&remote);
                     let remote_dir = parent_dir(&remote);
                     let id = Uuid::new_v4().to_string();
-                    let no_cancel = Arc::new(AtomicBool::new(false));
+                    let gate = Arc::new(TransferGate::default());
                     let result = upload_pipelined(
-                        &handle, &local, &remote, &filename, &id, &events, &no_cancel,
+                        &handle, &local, &remote, &filename, &id, &events, &gate,
                     )
                     .await;
                     match result {
@@ -1287,51 +1422,67 @@ async fn run_sftp(
             }
 
             SftpCommand::OpenTemp { remote, edit } => {
-                // Sanitize the remote-controlled name before it becomes a local
-                // file path that we later hand to the OS "open" call.
-                let filename = sanitize_filename(&base_name(&remote));
+                // Run on the transfer pool so Cancel / PauseAll stay responsive
+                // while the temp download is in flight (double-click open).
+                let handle = handle.clone();
+                let events = events.clone();
                 let tmp_dir = external_edit_dir.clone();
-                let _ = tokio::fs::create_dir_all(&tmp_dir).await;
-                let local = tmp_dir.join(external_edit_local_name(
-                    &external_edit_prefix,
-                    &filename,
-                    &Uuid::new_v4().to_string(),
-                ));
-                let local_str = local.to_string_lossy().to_string();
-                let _ = events.send(SessionEvent::SftpStatus(format!(
-                    "{} {}...",
-                    t("打开", "Opening"),
-                    filename
-                )));
+                let edit_prefix = external_edit_prefix.clone();
+                let self_tx = self_tx.clone();
                 let xid = Uuid::new_v4().to_string();
-                let no_cancel = Arc::new(AtomicBool::new(false));
-                match download_impl(
-                    &handle, &remote, &local_str, &filename, &xid, &events, &no_cancel,
-                )
-                .await
-                {
-                    Ok(_) => {
-                        open_with_os(&local_str);
-                        let _ = events.send(SessionEvent::SftpStatus(format!(
-                            "{}: {}",
+                let gate = Arc::new(TransferGate::default());
+                gates.lock().unwrap().insert(xid.clone(), gate.clone());
+                let gates_done = gates.clone();
+                transfers.spawn(async move {
+                    let filename = sanitize_filename(&base_name(&remote));
+                    let _ = tokio::fs::create_dir_all(&tmp_dir).await;
+                    let local = tmp_dir.join(external_edit_local_name(
+                        &edit_prefix,
+                        &filename,
+                        &Uuid::new_v4().to_string(),
+                    ));
+                    let local_str = local.to_string_lossy().to_string();
+                    let _ = events.send(SessionEvent::SftpStatus(format!(
+                        "{} {}...",
+                        t("打开", "Opening"),
+                        filename
+                    )));
+                    let open_result = download_impl(
+                        &handle, &remote, &local_str, &filename, &xid, &events, &gate,
+                    )
+                    .await;
+                    gates_done.lock().unwrap().remove(&xid);
+                    match open_result {
+                        Ok(true) => {
+                            open_with_os(&local_str);
+                            let _ = events.send(SessionEvent::SftpStatus(format!(
+                                "{}: {}",
+                                if edit {
+                                    t("已打开编辑", "Opened for editing")
+                                } else {
+                                    t("已打开", "Opened")
+                                },
+                                filename
+                            )));
                             if edit {
-                                t("已打开编辑", "Opened for editing")
-                            } else {
-                                t("已打开", "Opened")
-                            },
-                            filename
-                        )));
-                        if edit {
-                            spawn_edit_watcher(self_tx.clone(), local_str, remote.clone());
+                                spawn_edit_watcher(self_tx, local_str, remote);
+                            }
+                        }
+                        Ok(false) => {
+                            let _ = events.send(SessionEvent::SftpStatus(format!(
+                                "{}: {}",
+                                t("已取消", "Cancelled"),
+                                filename
+                            )));
+                        }
+                        Err(e) => {
+                            let _ = events.send(SessionEvent::SftpStatus(format!(
+                                "{}: {e}",
+                                t("打开失败", "Open failed")
+                            )));
                         }
                     }
-                    Err(e) => {
-                        let _ = events.send(SessionEvent::SftpStatus(format!(
-                            "{}: {e}",
-                            t("打开失败", "Open failed")
-                        )));
-                    }
-                }
+                });
             }
             SftpCommand::ReadText { remote, edit } => {
                 let name = base_name(&remote);
@@ -1794,8 +1945,11 @@ async fn stage_remote_for_copy(
         .ok()
         .map(|m| (m.permissions.unwrap_or(0) & 0o170_000) == 0o040_000)
         .unwrap_or(false);
-    let no_cancel = Arc::new(AtomicBool::new(false));
+    let gate = Arc::new(TransferGate::default());
     let id = Uuid::new_v4().to_string();
+    // Copy-to-session temp downloads aren't shown in the Transfers UI; a
+    // throwaway gate satisfies the transfer helpers' signature.
+    let unused_gates: TransferGates = Arc::new(Mutex::new(HashMap::new()));
 
     if is_dir {
         tokio::fs::create_dir_all(&local_path)
@@ -1806,11 +1960,20 @@ async fn stage_remote_for_copy(
             .map(|entries| entries.is_empty())
             .unwrap_or(false);
         if !empty {
-            download_dir(sftp, handle, remote, &local_parent, events).await?;
+            download_dir(
+                sftp,
+                handle,
+                remote,
+                &local_parent,
+                events,
+                &unused_gates,
+                &gate,
+            )
+            .await?;
         }
     } else {
         let local = local_path.to_string_lossy().to_string();
-        download_impl(handle, remote, &local, &name, &id, events, &no_cancel).await?;
+        download_impl(handle, remote, &local, &name, &id, events, &gate).await?;
     }
 
     Ok((local_path, cleanup_root))
@@ -2226,7 +2389,7 @@ async fn download_impl(
     name: &str,
     id: &str,
     events: &UnboundedSender<SessionEvent>,
-    cancel: &Arc<AtomicBool>,
+    gate: &Arc<TransferGate>,
 ) -> Result<bool> {
     use tokio::io::{AsyncSeekExt, AsyncWriteExt};
 
@@ -2270,7 +2433,7 @@ async fn download_impl(
         let mut next_off = 0u64;
         let mut inflight = FuturesUnordered::new();
         loop {
-            if cancel.load(Ordering::Relaxed) {
+            if gate_wait(gate, events, id, name, false, done, total).await {
                 cancelled = true;
             }
             // Top up the pipeline with fresh READ requests.
@@ -2331,7 +2494,7 @@ async fn download_impl(
         // Unknown / zero size: serial drain until EOF (rare; keeps correctness).
         let mut off = 0u64;
         loop {
-            if cancel.load(Ordering::Relaxed) {
+            if gate_wait(gate, events, id, name, false, done, done).await {
                 cancelled = true;
                 break;
             }
@@ -2399,19 +2562,24 @@ async fn download_dir(
     remote_root: &str,
     local_parent: &str,
     events: &UnboundedSender<SessionEvent>,
+    gates: &TransferGates,
+    folder_gate: &Arc<TransferGate>,
 ) -> Result<()> {
-    // Folder transfers aren't individually cancellable from the UI; a throwaway
-    // never-set flag satisfies download_impl's signature.
-    let no_cancel = Arc::new(AtomicBool::new(false));
     let root_name = sanitize_filename(&base_name(remote_root));
     let root_local = format!("{}/{}", local_parent.trim_end_matches('/'), root_name);
     // (remote_dir, local_dir) pairs still to mirror.
     let mut stack = vec![(remote_root.trim_end_matches('/').to_string(), root_local)];
     while let Some((rdir, ldir)) = stack.pop() {
+        if folder_gate.cancel.load(Ordering::Relaxed) {
+            return Ok(());
+        }
         tokio::fs::create_dir_all(&ldir)
             .await
             .with_context(|| format!("create local dir {ldir}"))?;
         for entry in list_dir_impl(sftp, &rdir).await? {
+            if folder_gate.cancel.load(Ordering::Relaxed) {
+                return Ok(());
+            }
             if entry.is_dir {
                 let child_local = format!("{}/{}", ldir, sanitize_filename(&entry.name));
                 stack.push((entry.full_path, child_local));
@@ -2419,16 +2587,31 @@ async fn download_dir(
                 let fname = sanitize_filename(&entry.name);
                 let lpath = format!("{}/{}", ldir, fname);
                 let id = Uuid::new_v4().to_string();
-                download_impl(
+                // Per-file gate so the Transfers row cancel / PauseAll work; also
+                // honour the folder-level cancel so stopping mid-tree ends the rest.
+                let gate = Arc::new(TransferGate {
+                    cancel: AtomicBool::new(folder_gate.cancel.load(Ordering::Relaxed)),
+                    pause: AtomicBool::new(folder_gate.pause.load(Ordering::Relaxed)),
+                });
+                gates.lock().unwrap().insert(id.clone(), gate.clone());
+                let result = download_impl(
                     handle,
                     &entry.full_path,
                     &lpath,
                     &fname,
                     &id,
                     events,
-                    &no_cancel,
+                    &gate,
                 )
-                .await?;
+                .await;
+                gates.lock().unwrap().remove(&id);
+                if folder_gate.cancel.load(Ordering::Relaxed)
+                    || gate.cancel.load(Ordering::Relaxed)
+                {
+                    folder_gate.cancel.store(true, Ordering::Relaxed);
+                    return Ok(());
+                }
+                result?;
             }
         }
     }
@@ -2476,20 +2659,25 @@ async fn upload_dir(
     local_root: &Path,
     remote_parent: &str,
     events: &UnboundedSender<SessionEvent>,
+    gates: &TransferGates,
+    folder_gate: &Arc<TransferGate>,
 ) -> Result<()> {
-    // Folder uploads aren't individually cancellable from the UI; a throwaway
-    // never-set flag satisfies upload_pipelined's signature.
-    let no_cancel = Arc::new(AtomicBool::new(false));
     let root_name = local_file_name_utf8(local_root)?;
     let remote_root = format!("{}/{}", remote_parent.trim_end_matches('/'), root_name);
     let mut stack = vec![(local_root.to_path_buf(), remote_root)];
     while let Some((ldir, rdir)) = stack.pop() {
+        if folder_gate.cancel.load(Ordering::Relaxed) {
+            return Ok(());
+        }
         // Best-effort mkdir; an error usually just means the dir already exists.
         let _ = sftp.create_dir(&rdir).await;
         let mut rd = tokio::fs::read_dir(&ldir)
             .await
             .with_context(|| format!("read local dir {}", ldir.display()))?;
         while let Some(entry) = rd.next_entry().await.context("read dir entry")? {
+            if folder_gate.cancel.load(Ordering::Relaxed) {
+                return Ok(());
+            }
             let lpath = entry.path();
             let name = local_file_name_utf8(&lpath)?;
             let rchild = format!("{}/{}", rdir, name);
@@ -2498,7 +2686,21 @@ async fn upload_dir(
                 stack.push((lpath, rchild));
             } else if ft.is_file() {
                 let id = Uuid::new_v4().to_string();
-                upload_pipelined(handle, &lpath, &rchild, &name, &id, events, &no_cancel).await?;
+                let gate = Arc::new(TransferGate {
+                    cancel: AtomicBool::new(folder_gate.cancel.load(Ordering::Relaxed)),
+                    pause: AtomicBool::new(folder_gate.pause.load(Ordering::Relaxed)),
+                });
+                gates.lock().unwrap().insert(id.clone(), gate.clone());
+                let result =
+                    upload_pipelined(handle, &lpath, &rchild, &name, &id, events, &gate).await;
+                gates.lock().unwrap().remove(&id);
+                if folder_gate.cancel.load(Ordering::Relaxed)
+                    || gate.cancel.load(Ordering::Relaxed)
+                {
+                    folder_gate.cancel.store(true, Ordering::Relaxed);
+                    return Ok(());
+                }
+                result?;
             }
         }
     }
@@ -2521,7 +2723,7 @@ async fn upload_pipelined(
     name: &str,
     id: &str,
     events: &UnboundedSender<SessionEvent>,
-    cancel: &Arc<AtomicBool>,
+    gate: &Arc<TransferGate>,
 ) -> Result<bool> {
     use tokio::io::AsyncReadExt;
 
@@ -2570,12 +2772,12 @@ async fn upload_pipelined(
     let mut inflight = FuturesUnordered::new();
 
     while !eof || !inflight.is_empty() {
-        if cancel.load(Ordering::Relaxed) {
+        if gate_wait(gate, events, id, name, true, done, total).await {
             cancelled = true;
             eof = true; // stop reading more; drain what's in flight
         }
         // Top up the pipeline with fresh WRITE requests.
-        while !eof && inflight.len() < MAX_INFLIGHT {
+        while !eof && !cancelled && inflight.len() < MAX_INFLIGHT {
             let mut buf = vec![0u8; CHUNK];
             match local_file.read(&mut buf).await {
                 Ok(0) => eof = true,

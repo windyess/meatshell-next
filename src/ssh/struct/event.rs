@@ -115,7 +115,7 @@ pub enum SessionEvent {
         is_upload: bool,
         transferred: u64,
         total: u64,
-        state: u8, // 0 = active, 1 = done, 2 = error
+        state: u8, // 0 active / 1 done / 2 error / 3 preparing / 4 cancelled / 5 paused
         msg: String,
     },
     /// A remote text file loaded for the built-in viewer/editor (#70). On

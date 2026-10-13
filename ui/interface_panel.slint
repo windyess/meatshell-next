@@ -370,6 +370,8 @@ export component InterfacePanel inherits Rectangle {
     in-out property <string> term-cursor-style: "block";
     in-out property <string> term-cursor-color-hex: "#D4D4D4";
     in property <color> term-cursor-color: #D4D4D4;
+    in-out property <string> term-fg-color-hex: "#D4D4D4";
+    in property <color> term-fg-color: #D4D4D4;
     in-out property <bool> output-highlight-enabled;
     in-out property <bool> json-format-output: true;
     in-out property <string> output-highlight-preset;
@@ -401,7 +403,7 @@ export component InterfacePanel inherits Rectangle {
     in-out property <bool> mcp-use-saved-credentials: true;
     in-out property <bool> mcp-allow-commands: true;
     in-out property <bool> mcp-allow-file-transfers: true;
-    in-out property <float> wallpaper-overlay;   // frosted-panel opacity 0.30-1.00
+    in-out property <float> wallpaper-overlay;   // frosted-panel opacity 0.0-1.00
     in-out property <float> term-wallpaper-overlay;
     // Active wallpaper id: "" / "builtin:light" / "builtin:dark" / a file path.
     in property <string> current-wallpaper;
@@ -436,6 +438,7 @@ export component InterfacePanel inherits Rectangle {
     callback set-term-font-bold(bool);
     callback set-term-cursor-style(string);
     callback set-term-cursor-color(string) -> bool;
+    callback set-term-fg-color(string) -> bool;
     callback set-output-highlight(bool, string);
     callback set-json-format-output(bool);
     callback add-output-highlight-rule(string, bool, bool, bool, string) -> bool;
@@ -638,6 +641,16 @@ export component InterfacePanel inherits Rectangle {
                     Switch {
                         on: root.term-font-bold;
                         toggled(v) => { root.term-font-bold = v; root.set-term-font-bold(v); }
+                    }
+                }
+                SettingRow {
+                    label: root.lang-en ? "Terminal text color" : "终端字体颜色";
+                    desc: root.lang-en ? "Default colour for unstyled terminal text."
+                                       : "未着色的终端正文默认颜色。";
+                    CursorColorInput {
+                        value <=> root.term-fg-color-hex;
+                        preview-color: root.term-fg-color;
+                        apply-color(v) => { root.set-term-fg-color(v) }
                     }
                 }
                 SettingRow {
@@ -1382,7 +1395,7 @@ export component InterfacePanel inherits Rectangle {
                         Slider {
                             width: 150px;
                             minimum: 0;
-                            maximum: 70;
+                            maximum: 100;
                             value: (1.0 - root.wallpaper-overlay) * 100;
                             changed(v) => { root.wallpaper-overlay = 1.0 - v / 100; }
                             released(v) => { root.persist-wallpaper-overlay(1.0 - v / 100); }
@@ -1407,7 +1420,7 @@ export component InterfacePanel inherits Rectangle {
                         Slider {
                             width: 150px;
                             minimum: 0;
-                            maximum: 70;
+                            maximum: 100;
                             value: (1.0 - root.term-wallpaper-overlay) * 100;
                             changed(v) => { root.term-wallpaper-overlay = 1.0 - v / 100; }
                             released(v) => { root.persist-term-wallpaper-overlay(1.0 - v / 100); }

@@ -35,13 +35,23 @@ fn default_wallpaper() -> String {
 }
 
 /// Bump when `migrate_defaults` gains a new one-time default-layout change.
-pub const DEFAULTS_REV: u32 = 3;
+pub const DEFAULTS_REV: u32 = 4;
 
 pub(crate) const PREVIOUS_DEFAULT_WALLPAPER_TRANSPARENCY: f32 = 0.38;
 pub(crate) const PREVIOUS_DEFAULT_WALLPAPER_OVERLAY: f32 =
     1.0 - PREVIOUS_DEFAULT_WALLPAPER_TRANSPARENCY;
 pub(crate) const DEFAULT_WALLPAPER_TRANSPARENCY: f32 = 0.15;
 pub(crate) const DEFAULT_WALLPAPER_OVERLAY: f32 = 1.0 - DEFAULT_WALLPAPER_TRANSPARENCY;
+
+fn default_wallpaper_overlay() -> f32 {
+    DEFAULT_WALLPAPER_OVERLAY
+}
+
+/// Negative = follow `wallpaper_overlay` (replaces the old `0.0` sentinel so alpha
+/// 0 can mean fully transparent).
+fn default_term_wallpaper_overlay() -> f32 {
+    -1.0
+}
 
 pub(crate) fn default_sidebar_width() -> f32 {
     220.0
@@ -75,7 +85,7 @@ pub(crate) fn default_quick_panel_height() -> f32 {
 }
 
 /// On-disk layout. Keep additive to ease forward-compat.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConfigFile {
     #[serde(default)]
     pub sessions: Vec<Session>,
@@ -114,6 +124,9 @@ pub struct ConfigFile {
     /// Custom terminal cursor colour as #RRGGBB. Empty follows the theme (#275).
     #[serde(default)]
     pub terminal_cursor_color: String,
+    /// Custom default terminal text colour as #RRGGBB. Empty follows the theme.
+    #[serde(default)]
+    pub terminal_fg_color: String,
     /// Stored inverted so missing/legacy config keeps the automatic plain-text
     /// output highlighter enabled by default.
     #[serde(default)]
@@ -289,12 +302,13 @@ pub struct ConfigFile {
     /// None means the user has not explicitly collapsed/expanded it yet.
     #[serde(default)]
     pub welcome_collapsed: Option<bool>,
-    /// Frosted-panel opacity over a wallpaper (0.30–1.00); user-adjustable via the
-    /// Interface › Wallpaper opacity slider. 0 = use the current default.
-    #[serde(default)]
+    /// Frosted-panel opacity over a wallpaper (0.0–1.00); user-adjustable via the
+    /// Interface › Wallpaper opacity slider.
+    #[serde(default = "default_wallpaper_overlay")]
     pub wallpaper_overlay: f32,
-    /// Frost opacity over the terminal pane (0.30–1.00). 0 = follow wallpaper_overlay.
-    #[serde(default)]
+    /// Frost opacity over the terminal pane (0.0–1.00). Negative = follow
+    /// `wallpaper_overlay` (legacy configs stored `0.0` for follow; rev 4 remaps).
+    #[serde(default = "default_term_wallpaper_overlay")]
     pub term_wallpaper_overlay: f32,
     /// Settings-panel font scale, percent (80–160). 0 = 100% default (v0.5).
     #[serde(default)]
@@ -335,6 +349,14 @@ pub struct ConfigFile {
     /// layout.
     #[serde(default)]
     pub dock_stacks: Vec<DockEdgeSer>,
+}
+
+impl Default for ConfigFile {
+    fn default() -> Self {
+        // Keep in sync with `#[serde(default = ...)]` field hooks (wallpaper
+        // overlay, term follow sentinel, etc.).
+        serde_json::from_value(serde_json::json!({})).expect("empty ConfigFile defaults")
+    }
 }
 
 /// Portable export file (issue #46): sessions with everything in plaintext

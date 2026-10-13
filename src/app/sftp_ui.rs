@@ -1,5 +1,47 @@
 use super::*;
 
+/// Fluent file-type icon key for the SFTP name column (see `assets/file-icons`).
+pub(super) fn sftp_entry_icon_kind(
+    name: &str,
+    is_dir: bool,
+    file_type: &str,
+    mode: u32,
+) -> SharedString {
+    if is_dir || file_type == "directory" {
+        return "folder".into();
+    }
+    if file_type == "symlink" {
+        return "link".into();
+    }
+
+    let ext = name
+        .rsplit_once('.')
+        .map(|(_, e)| e.to_ascii_lowercase())
+        .unwrap_or_default();
+    let kind = match ext.as_str() {
+        "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" | "ico" | "svg" | "heic" | "avif" => {
+            "image"
+        }
+        "mp4" | "mkv" | "avi" | "mov" | "webm" | "m4v" | "flv" | "wmv" => "video",
+        "mp3" | "wav" | "flac" | "ogg" | "m4a" | "aac" | "wma" | "opus" => "audio",
+        "zip" | "tar" | "gz" | "tgz" | "bz2" | "xz" | "7z" | "rar" | "zst" => "archive",
+        "pdf" => "pdf",
+        "xls" | "xlsx" | "xlsm" | "ods" | "csv" => "table",
+        "doc" | "docx" | "odt" | "rtf" | "ppt" | "pptx" | "odp" => "document",
+        "rs" | "py" | "js" | "jsx" | "ts" | "tsx" | "go" | "c" | "h" | "cpp" | "hpp" | "cc"
+        | "java" | "kt" | "swift" | "rb" | "php" | "lua" | "pl" | "r" | "scala" | "cs"
+        | "vue" | "svelte" | "dart" | "zig" | "nim" | "html" | "htm" | "css" | "scss"
+        | "less" | "sass" => "code",
+        "sh" | "bash" | "zsh" | "fish" | "ps1" | "bat" | "cmd" => "terminal",
+        "json" | "yml" | "yaml" | "toml" | "ini" | "conf" | "cfg" | "xml" | "plist" => "config",
+        "txt" | "md" | "markdown" | "log" | "rst" | "org" => "text",
+        "exe" | "msi" | "dmg" | "app" | "appimage" | "deb" | "rpm" => "exe",
+        _ if mode & 0o111 != 0 => "terminal",
+        _ => "file",
+    };
+    kind.into()
+}
+
 pub(super) fn terminal_sftp_paths(w: &AppWindow) -> HashMap<String, String> {
     use slint::Model as _;
     let mut out = HashMap::new();

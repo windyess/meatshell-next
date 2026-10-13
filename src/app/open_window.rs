@@ -700,6 +700,118 @@ pub(super) fn open_window(
             }
         });
     }
+    {
+        let sftp_handles = sftp_handles.clone();
+        let tm = transfers_model.clone();
+        let win_weak = window.as_weak();
+        window.on_pause_transfer(move |id: SharedString| {
+            let id_str = id.to_string();
+            if let Ok(handles) = sftp_handles.lock() {
+                for h in handles.values() {
+                    h.pause_transfer(id_str.clone());
+                }
+            }
+            for i in 0..tm.row_count() {
+                if let Some(mut row) = tm.row_data(i) {
+                    if row.id.as_str() == id_str && (row.state == 0 || row.state == 3) {
+                        row.state = 5;
+                        row.detail = t("已暂停", "Paused").into();
+                        tm.set_row_data(i, row);
+                        break;
+                    }
+                }
+            }
+            let has_active = (0..tm.row_count()).any(|i| {
+                tm.row_data(i)
+                    .map(|r| r.state == 0 || r.state == 3)
+                    .unwrap_or(false)
+            });
+            if let Some(win) = win_weak.upgrade() {
+                win.set_has_active_transfers(has_active);
+            }
+        });
+    }
+    {
+        let sftp_handles = sftp_handles.clone();
+        let tm = transfers_model.clone();
+        let win_weak = window.as_weak();
+        window.on_resume_transfer(move |id: SharedString| {
+            let id_str = id.to_string();
+            if let Ok(handles) = sftp_handles.lock() {
+                for h in handles.values() {
+                    h.resume_transfer(id_str.clone());
+                }
+            }
+            for i in 0..tm.row_count() {
+                if let Some(mut row) = tm.row_data(i) {
+                    if row.id.as_str() == id_str && row.state == 5 {
+                        row.state = 0;
+                        row.detail = "".into();
+                        tm.set_row_data(i, row);
+                        break;
+                    }
+                }
+            }
+            if let Some(win) = win_weak.upgrade() {
+                win.set_has_active_transfers(true);
+            }
+        });
+    }
+    {
+        let sftp_handles = sftp_handles.clone();
+        let tm = transfers_model.clone();
+        let win_weak = window.as_weak();
+        window.on_pause_all_transfers(move || {
+            if let Ok(handles) = sftp_handles.lock() {
+                for h in handles.values() {
+                    h.pause_all_transfers();
+                }
+            }
+            // Optimistic UI: mark active/preparing rows as paused until the
+            // worker emits the next progress tick.
+            for i in 0..tm.row_count() {
+                if let Some(mut row) = tm.row_data(i) {
+                    if row.state == 0 || row.state == 3 {
+                        row.state = 5;
+                        row.detail = t("已暂停", "Paused").into();
+                        tm.set_row_data(i, row);
+                    }
+                }
+            }
+            if let Some(win) = win_weak.upgrade() {
+                win.set_has_active_transfers(false);
+            }
+        });
+    }
+    {
+        let sftp_handles = sftp_handles.clone();
+        let tm = transfers_model.clone();
+        let win_weak = window.as_weak();
+        window.on_resume_all_transfers(move || {
+            if let Ok(handles) = sftp_handles.lock() {
+                for h in handles.values() {
+                    h.resume_all_transfers();
+                }
+            }
+            for i in 0..tm.row_count() {
+                if let Some(mut row) = tm.row_data(i) {
+                    if row.state == 5 {
+                        row.state = 0;
+                        row.detail = "".into();
+                        tm.set_row_data(i, row);
+                    }
+                }
+            }
+            let has_active = (0..tm.row_count()).any(|i| {
+                tm.row_data(i)
+                    .map(|r| r.state == 0 || r.state == 3)
+                    .unwrap_or(false)
+            });
+            if let Some(win) = win_weak.upgrade() {
+                win.set_has_active_transfers(has_active);
+            }
+        });
+    }
 
     set_about_libraries(&ctx);
 

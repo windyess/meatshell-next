@@ -24,10 +24,13 @@ pub enum SftpCommand {
     /// Toggle a directory node in the tree (expand if collapsed, collapse if expanded).
     ToggleTreeNode(String),
     /// Download a remote file to a local directory.
+    /// When `open_after` is set, open the saved file with the OS default app
+    /// (double-click open — uses the download dir, not a temp folder).
     Download {
         remote: String,
         local_dir: String,
         conflict: DownloadConflict,
+        open_after: bool,
     },
     /// Multi-select download (#100): tar the named entries under `remote_dir`
     /// into one archive on the remote, download it, then delete the temp.
@@ -39,6 +42,14 @@ pub enum SftpCommand {
     /// Cancel an in-progress transfer by its id (#100). The partial local file
     /// (and any remote temp archive) are cleaned up.
     CancelTransfer(String),
+    /// Pause one in-flight transfer by id.
+    PauseTransfer(String),
+    /// Resume one paused transfer by id.
+    ResumeTransfer(String),
+    /// Pause every in-flight transfer owned by this worker.
+    PauseAllTransfers,
+    /// Resume every paused transfer owned by this worker.
+    ResumeAllTransfers,
     /// Upload a local file into a remote directory.
     Upload {
         local: PathBuf,

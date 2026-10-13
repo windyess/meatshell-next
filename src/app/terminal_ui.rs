@@ -40,6 +40,46 @@ pub(super) fn parse_hex_color(value: &str) -> Option<slint::Color> {
     Some(slint::Color::from_rgb_u8(red, green, blue))
 }
 
+pub(super) fn parse_hex_rgb(value: &str) -> Option<(u8, u8, u8)> {
+    let digits = value.trim().strip_prefix('#').unwrap_or(value.trim());
+    if digits.len() != 6 || !digits.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return None;
+    }
+    let red = u8::from_str_radix(&digits[0..2], 16).ok()?;
+    let green = u8::from_str_radix(&digits[2..4], 16).ok()?;
+    let blue = u8::from_str_radix(&digits[4..6], 16).ok()?;
+    Some((red, green, blue))
+}
+
+/// Apply the configured default terminal text colour to Theme + the ANSI
+/// default-fg override, then rebuild every open tab so existing spans update.
+pub(super) fn apply_terminal_fg_color(
+    window: &AppWindow,
+    bufs: &TermBuffers,
+    hex: &str,
+    is_dark: bool,
+) {
+    let (override_rgb, r, g, b) = if let Some((r, g, b)) = parse_hex_rgb(hex) {
+        (Some((r, g, b)), r, g, b)
+    } else {
+        let (r, g, b) = if is_dark {
+            (0xd4, 0xd4, 0xd4)
+        } else {
+            (0x2d, 0x2d, 0x2f)
+        };
+        (None, r, g, b)
+    };
+    let color = slint::Color::from_rgb_u8(r, g, b);
+    crate::terminal::set_default_fg_override(override_rgb);
+    window.set_term_fg(slint::Brush::from(color));
+    window.set_term_fg_color_hex(format!("#{r:02X}{g:02X}{b:02X}").into());
+    window.set_term_fg_color(color);
+    let tab_ids: Vec<String> = bufs.lock().unwrap().keys().cloned().collect();
+    for tid in tab_ids {
+        rebuild_tab_display(window, bufs, &tid);
+    }
+}
+
 pub(super) fn validate_output_highlight_rule(
     pattern: &str,
     is_regex: bool,
@@ -267,6 +307,21 @@ pub(super) fn apply_dark_mode(window: &AppWindow, bufs: &TermBuffers, dark: bool
         for h in handles {
             h.lock().unwrap().is_dark = dark;
         }
+    }
+    // Custom font colour survives theme flips; otherwise snap Theme.term-fg to
+    // the light/dark default so preview + unstyled text stay in sync.
+    if !crate::terminal::has_default_fg_override() {
+        let (r, g, b) = if dark {
+            (0xd4, 0xd4, 0xd4)
+        } else {
+            (0x2d, 0x2d, 0x2f)
+        };
+        let color = slint::Color::from_rgb_u8(r, g, b);
+        window.set_term_fg(slint::Brush::from(color));
+        window.set_term_fg_color(color);
+        window.set_term_fg_color_hex(
+            format!("#{:02X}{:02X}{:02X}", r, g, b).into(),
+        );
     }
     let tab_ids: Vec<String> = bufs.lock().unwrap().keys().cloned().collect();
     for tid in tab_ids {

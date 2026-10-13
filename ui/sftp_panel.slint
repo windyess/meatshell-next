@@ -21,6 +21,30 @@ export struct SftpEntry {
     owner: string,
     group: string,
     selected: bool,   // multi-select checkbox state (#100)
+    // Bundled Fluent file-type icon key (folder/image/pdf/…).
+    icon-kind: string,
+}
+
+// Name-column thumbnail: Fluent System Icons SVGs under assets/file-icons.
+component SftpFileIcon inherits Image {
+    in property <string> kind;
+    width: 16px;
+    height: 16px;
+    source: root.kind == "folder" ? @image-url("../assets/file-icons/folder.svg")
+        : root.kind == "link" ? @image-url("../assets/file-icons/link.svg")
+        : root.kind == "image" ? @image-url("../assets/file-icons/image.svg")
+        : root.kind == "video" ? @image-url("../assets/file-icons/video.svg")
+        : root.kind == "audio" ? @image-url("../assets/file-icons/audio.svg")
+        : root.kind == "archive" ? @image-url("../assets/file-icons/archive.svg")
+        : root.kind == "pdf" ? @image-url("../assets/file-icons/pdf.svg")
+        : root.kind == "code" ? @image-url("../assets/file-icons/code.svg")
+        : root.kind == "document" ? @image-url("../assets/file-icons/document.svg")
+        : root.kind == "table" ? @image-url("../assets/file-icons/table.svg")
+        : root.kind == "config" ? @image-url("../assets/file-icons/config.svg")
+        : root.kind == "text" ? @image-url("../assets/file-icons/text.svg")
+        : root.kind == "terminal" ? @image-url("../assets/file-icons/terminal.svg")
+        : root.kind == "exe" ? @image-url("../assets/file-icons/exe.svg")
+        : @image-url("../assets/file-icons/file.svg");
 }
 
 export struct SftpTreeNode {
@@ -52,44 +76,16 @@ export struct QuickCmd {
     command-preview: string,
 }
 
-// Visible divider between two column titles; drag to resize the column on the left.
-component SftpColSplit inherits Rectangle {
-    in-out property <length> value;
-    in property <length> min-w: 56px;
-    in property <length> max-w: 520px;
-    callback released();
-    width: 8px;
-    height: 100%;
-    property <bool> dragging;
-    property <length> origin-w;
-    property <length> origin-x;
+// Vertical hairline between SFTP column titles. Darker than row-rule so
+// the header columns stay easy to tell apart.
+component SftpHeaderSplit inherits Rectangle {
+    width: 9px;
     Rectangle {
-        x: 3.5px;
+        x: 4px;
+        y: 4px;
         width: 1px;
-        height: 100%;
-        background: ta.pressed || ta.has-hover ? Theme.accent : Theme.border-subtle;
-    }
-    ta := TouchArea {
-        mouse-cursor: ew-resize;
-        pointer-event(ev) => {
-            if (ev.kind == PointerEventKind.down && ev.button == PointerEventButton.left) {
-                root.dragging = true;
-                root.origin-w = root.value;
-                root.origin-x = self.absolute-position.x + self.mouse-x;
-            } else if (ev.kind == PointerEventKind.up || ev.kind == PointerEventKind.cancel) {
-                if (root.dragging) {
-                    root.dragging = false;
-                    root.released();
-                }
-            }
-        }
-        moved => {
-            if (root.dragging) {
-                root.value = clamp(
-                    root.origin-w + (self.absolute-position.x + self.mouse-x - root.origin-x),
-                    root.min-w, root.max-w);
-            }
-        }
+        height: parent.height - 8px;
+        background: Theme.border-strong;
     }
 }
 
@@ -172,7 +168,7 @@ export component SftpPanel inherits Rectangle {
     callback persist-tree-width(length);
     property <bool> tree-resizing: false;
     property <length> list-w: root.show-tree ? root.width - root.tree-width - 5px : root.width;
-    property <length> name-min: max(120px, root.col-name);
+    property <length> name-min: 180px;
     property <bool> show-permissions-col: root.show-permissions;
     property <bool> show-type-col: root.show-type;
     property <bool> show-size-col: root.show-size;
@@ -218,6 +214,8 @@ export component SftpPanel inherits Rectangle {
     callback toggle-collapsed();    // minimise / restore the panel
     callback navigate(string);
     callback download(string);
+    // Download into the configured download dir, then open with the OS default app.
+    callback download-and-open(string);
     callback upload-clicked(string /* remote dir */, bool /* folder */);
     callback refresh(string);
     callback tree-expand(string);   // toggle expand/collapse + navigate
@@ -848,8 +846,10 @@ export component SftpPanel inherits Rectangle {
                     HorizontalLayout {
                         padding-left: 8px; padding-right: 8px; spacing: 0;
                         Rectangle { width: 16px; }
+                        Rectangle { width: 8px; }
                         Rectangle {
-                            width: root.col-name;
+                            horizontal-stretch: 1;
+                            min-width: root.name-min;
                             clip: true;
                             header-name-ta := TouchArea {
                                 mouse-cursor: pointer;
@@ -863,7 +863,8 @@ export component SftpPanel inherits Rectangle {
                                 }
                             }
                             Text {
-                                text: @tr("Name") + (root.sort-key == "name" ? (root.sort-dir > 0 ? " ↑" : " ↓") : "");
+                                text: @tr("Name") + " (" + root.entries.length + ")"
+                                    + (root.sort-key == "name" ? (root.sort-dir > 0 ? " ↑" : " ↓") : "");
                                 color: root.sort-key == "name" ? Theme.accent : Theme.text-muted;
                                 font-size: Theme.sftp-fs-md;
                                 width: parent.width;
@@ -871,13 +872,9 @@ export component SftpPanel inherits Rectangle {
                                 vertical-alignment: center;
                             }
                         }
-                        SftpColSplit {
-                            value <=> root.col-name;
-                            min-w: 120px; max-w: 640px;
-                            released => { root.persist-col-width("name", root.col-name); }
-                        }
+                        if root.show-size-col : SftpHeaderSplit { }
                         if root.show-size-col : Rectangle {
-                            width: root.col-size;
+                            width: 72px;
                             header-size-ta := TouchArea {
                                 mouse-cursor: pointer;
                                 clicked => { root.sort-request("size"); }
@@ -898,13 +895,9 @@ export component SftpPanel inherits Rectangle {
                                 vertical-alignment: center;
                             }
                         }
-                        if root.show-size-col : SftpColSplit {
-                            value <=> root.col-size;
-                            min-w: 48px; max-w: 240px;
-                            released => { root.persist-col-width("size", root.col-size); }
-                        }
+                        if root.show-modified-col : SftpHeaderSplit { }
                         if root.show-modified-col : Rectangle {
-                            width: root.col-modified;
+                            width: 116px;
                             header-modified-ta := TouchArea {
                                 mouse-cursor: pointer;
                                 clicked => { root.sort-request("modified"); }
@@ -925,13 +918,9 @@ export component SftpPanel inherits Rectangle {
                                 vertical-alignment: center;
                             }
                         }
-                        if root.show-modified-col : SftpColSplit {
-                            value <=> root.col-modified;
-                            min-w: 72px; max-w: 280px;
-                            released => { root.persist-col-width("modified", root.col-modified); }
-                        }
+                        if root.show-type-col : SftpHeaderSplit { }
                         if root.show-type-col : Rectangle {
-                            width: root.col-type;
+                            width: 100px;
                             type-header-ta := TouchArea {
                                 mouse-cursor: pointer;
                                 clicked => { root.sort-request("type"); }
@@ -946,13 +935,9 @@ export component SftpPanel inherits Rectangle {
                             Text { text: @tr("Type") + (root.sort-key == "type" ? (root.sort-dir > 0 ? " ↑" : " ↓") : ""); color: root.sort-key == "type" ? Theme.accent : Theme.text-muted; font-size: Theme.sftp-fs-md;
                                    width: parent.width; horizontal-alignment: right; vertical-alignment: center; }
                         }
-                        if root.show-type-col : SftpColSplit {
-                            value <=> root.col-type;
-                            min-w: 64px; max-w: 240px;
-                            released => { root.persist-col-width("type", root.col-type); }
-                        }
+                        if root.show-permissions-col : SftpHeaderSplit { }
                         if root.show-permissions-col : Rectangle {
-                            width: root.col-permissions;
+                            width: 104px;
                             permissions-header-ta := TouchArea {
                                 mouse-cursor: pointer;
                                 clicked => { root.sort-request("permissions"); }
@@ -967,13 +952,9 @@ export component SftpPanel inherits Rectangle {
                             Text { text: @tr("Permissions") + (root.sort-key == "permissions" ? (root.sort-dir > 0 ? " ↑" : " ↓") : ""); color: root.sort-key == "permissions" ? Theme.accent : Theme.text-muted; font-size: Theme.sftp-fs-md;
                                    width: parent.width; horizontal-alignment: right; vertical-alignment: center; }
                         }
-                        if root.show-permissions-col : SftpColSplit {
-                            value <=> root.col-permissions;
-                            min-w: 72px; max-w: 240px;
-                            released => { root.persist-col-width("permissions", root.col-permissions); }
-                        }
+                        if root.show-owner-col : SftpHeaderSplit { }
                         if root.show-owner-col : Rectangle {
-                            width: root.col-owner;
+                            width: 84px;
                             owner-header-ta := TouchArea {
                                 mouse-cursor: pointer;
                                 clicked => { root.sort-request("owner"); }
@@ -988,13 +969,9 @@ export component SftpPanel inherits Rectangle {
                             Text { text: @tr("Owner") + (root.sort-key == "owner" ? (root.sort-dir > 0 ? " ↑" : " ↓") : ""); color: root.sort-key == "owner" ? Theme.accent : Theme.text-muted; font-size: Theme.sftp-fs-md;
                                    width: parent.width; horizontal-alignment: right; vertical-alignment: center; }
                         }
-                        if root.show-owner-col : SftpColSplit {
-                            value <=> root.col-owner;
-                            min-w: 56px; max-w: 220px;
-                            released => { root.persist-col-width("owner", root.col-owner); }
-                        }
+                        if root.show-group-col : SftpHeaderSplit { }
                         if root.show-group-col : Rectangle {
-                            width: root.col-group;
+                            width: 84px;
                             group-header-ta := TouchArea {
                                 mouse-cursor: pointer;
                                 clicked => { root.sort-request("group"); }
@@ -1006,11 +983,6 @@ export component SftpPanel inherits Rectangle {
                             }
                             Text { text: @tr("Group") + (root.sort-key == "group" ? (root.sort-dir > 0 ? " ↑" : " ↓") : ""); color: root.sort-key == "group" ? Theme.accent : Theme.text-muted; font-size: Theme.sftp-fs-md;
                                    width: parent.width; horizontal-alignment: right; vertical-alignment: center; }
-                        }
-                        if root.show-group-col : SftpColSplit {
-                            value <=> root.col-group;
-                            min-w: 56px; max-w: 220px;
-                            released => { root.persist-col-width("group", root.col-group); }
                         }
                         Rectangle { horizontal-stretch: 1; }
                     }
@@ -1088,7 +1060,7 @@ export component SftpPanel inherits Rectangle {
                                         if (entry.is-dir) {
                                             root.navigate(entry.full-path);
                                         } else {
-                                            root.download(entry.full-path);
+                                            root.download-and-open(entry.full-path);
                                         }
                                     }
                                     pointer-event(ev) => {
@@ -1147,14 +1119,12 @@ export component SftpPanel inherits Rectangle {
                                     }
 
                                     HorizontalLayout {
-                                        width: root.col-name;
+                                        horizontal-stretch: 1;
+                                        min-width: root.name-min;
                                         spacing: 4px;
-                                        Text {
-                                            text: entry.is-dir ? "\u{E2C7}" : "\u{E24D}"; // folder / insert_drive_file
-                                            font-family: "Material Icons";
-                                            color: entry.is-dir ? Theme.accent : Theme.text-secondary;
-                                            font-size: Theme.sftp-fs-lg;
-                                            vertical-alignment: center;
+                                        SftpFileIcon {
+                                            kind: entry.icon-kind;
+                                            y: (parent.height - self.height) / 2;
                                         }
                                         Text {
                                             text: entry.name;
@@ -1165,41 +1135,35 @@ export component SftpPanel inherits Rectangle {
                                             vertical-alignment: center;
                                         }
                                     }
-                                    Rectangle { width: 8px; }
                                     if root.show-size-col : Text {
                                         text: entry.is-dir ? "" : entry.size;
                                         color: Theme.text-secondary; font-size: Theme.sftp-fs-md;
-                                        width: root.col-size; horizontal-alignment: right; vertical-alignment: center;
+                                        width: 72px; horizontal-alignment: right; vertical-alignment: center;
                                     }
-                                    if root.show-size-col : Rectangle { width: 8px; }
                                     if root.show-modified-col : Text {
                                         text: entry.modified;
                                         color: Theme.text-muted; font-size: Theme.sftp-fs-md;
-                                         width: root.col-modified; horizontal-alignment: right; vertical-alignment: center;
-                                     }
-                                    if root.show-modified-col : Rectangle { width: 8px; }
+                                        width: 116px; horizontal-alignment: right; vertical-alignment: center;
+                                    }
                                     if root.show-type-col : Text {
                                         text: entry.file-type;
                                         color: Theme.text-secondary; font-size: Theme.sftp-fs-md;
-                                        width: root.col-type; horizontal-alignment: right; vertical-alignment: center;
+                                        width: 100px; horizontal-alignment: right; vertical-alignment: center;
                                     }
-                                    if root.show-type-col : Rectangle { width: 8px; }
                                     if root.show-permissions-col : Text {
                                         text: entry.permissions;
                                         color: Theme.text-secondary; font-size: Theme.sftp-fs-md;
-                                        width: root.col-permissions; horizontal-alignment: right; vertical-alignment: center;
+                                        width: 104px; horizontal-alignment: right; vertical-alignment: center;
                                     }
-                                    if root.show-permissions-col : Rectangle { width: 8px; }
                                     if root.show-owner-col : Text {
                                         text: entry.owner;
                                         color: Theme.text-secondary; font-size: Theme.sftp-fs-md;
-                                        width: root.col-owner; horizontal-alignment: right; vertical-alignment: center;
+                                        width: 84px; horizontal-alignment: right; vertical-alignment: center;
                                     }
-                                    if root.show-owner-col : Rectangle { width: 8px; }
                                     if root.show-group-col : Text {
                                         text: entry.group;
                                         color: Theme.text-secondary; font-size: Theme.sftp-fs-md;
-                                        width: root.col-group; horizontal-alignment: right; vertical-alignment: center;
+                                        width: 84px; horizontal-alignment: right; vertical-alignment: center;
                                     }
                                 }
                             }

@@ -46,6 +46,12 @@ pub(super) fn apply_saved_appearance(ctx: &WinCtx) {
             window.set_term_cursor_color_hex(s.terminal_cursor_color().into());
             window.set_term_cursor_color(color);
         }
+        apply_terminal_fg_color(
+            window,
+            bufs,
+            s.terminal_fg_color(),
+            window.get_dark_mode(),
+        );
         window.set_output_highlight_enabled(s.output_highlight_enabled());
         window.set_json_format_output(s.json_format_output());
         window.set_session_log_enabled(s.session_log_enabled());
@@ -518,6 +524,27 @@ pub(super) fn wire_terminal_settings(ctx: &WinCtx) {
             }
             if let Some(w) = weak.upgrade() {
                 w.set_term_cursor_color(color);
+            }
+            true
+        });
+    }
+    {
+        let weak = window.as_weak();
+        let store = store.clone();
+        let bufs = bufs.clone();
+        window.on_set_term_fg_color(move |value: SharedString| {
+            if parse_hex_color(value.as_str()).is_none() {
+                return false;
+            }
+            {
+                let mut s = store.borrow_mut();
+                if !s.set_terminal_fg_color(value.as_str()) {
+                    return false;
+                }
+                let _ = s.save();
+            }
+            if let Some(w) = weak.upgrade() {
+                apply_terminal_fg_color(&w, &bufs, value.as_str(), w.get_dark_mode());
             }
             true
         });
