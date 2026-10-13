@@ -5,8 +5,16 @@ All notable changes are documented here. 本文件记录所有重要变更。
 
 ## Unreleased
 
-- **启动时默认展开快速连接。** 不再恢复上次自动收起后的折叠状态；未固定时点击其他区域仍会收起。
-- **Open Quick Connect expanded on startup.** The last auto-hide collapsed state is not restored; unpinned, it still collapses after a click elsewhere.
+## [0.7.10] - 2026-10-14
+
+- **导入连接支持一次多选多个 JSON。** 设置菜单「导入连接」的文件对话框可多选；成功数与跳过数合计，某个文件失败不影响其余文件。
+- **Import connections can pick several JSON files at once.** The Settings → Import connections dialog is multi-select; added/skipped counts are summed, and a failed file does not stop the rest.
+
+- **启动时默认展开快速连接。** 未固定时不再恢复上次自动收起后的折叠状态；已固定则记住展开/收起。
+- **Open Quick Connect expanded on startup.** Unpinned auto-hide is not restored as a folded strip; a pinned layout keeps its last expand/collapse choice.
+
+- **更新应用图标。** 替换窗口 / 任务栏使用的 PNG 与 ICO。
+- **Update the app icon** used by the window and taskbar.
 
 ## [0.7.9] - 2026-10-13
 

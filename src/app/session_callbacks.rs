@@ -333,29 +333,65 @@ pub(super) fn wire_session_callbacks(
         let sessions_model = sessions_model.clone();
         let registry = registry.clone();
         window.on_import_sessions(move || {
-            if let Some(path) = DialogOwner::of_weak(&weak)
+            let Some(paths) = DialogOwner::of_weak(&weak)
                 .file()
+                .set_title(t("选择连接文件（可多选）", "Choose connection files (multi-select)"))
                 .add_filter("JSON", &["json"])
-                .pick_file()
-            {
-                let res = store.borrow_mut().import_from(&path);
-                if let Some(w) = weak.upgrade() {
-                    let hint = match res {
-                        Ok((added, skipped)) => {
-                            sync_sessions_for_window(&weak, &store.borrow(), &sessions_model);
-                            registry.broadcast_config_changed();
-                            format!(
-                                "{} {} / {} {}",
-                                t("已导入", "imported"),
-                                added,
-                                t("跳过重复", "skipped"),
-                                skipped
-                            )
-                        }
-                        Err(e) => format!("{}: {}", t("导入失败", "import failed"), e),
-                    };
-                    w.set_ssh_import_hint(hint.into());
+                .pick_files()
+            else {
+                return;
+            };
+            if paths.is_empty() {
+                return;
+            }
+            let mut added = 0usize;
+            let mut skipped = 0usize;
+            let mut errors: Vec<String> = Vec::new();
+            for path in &paths {
+                match store.borrow_mut().import_from(path) {
+                    Ok((a, s)) => {
+                        added += a;
+                        skipped += s;
+                    }
+                    Err(e) => {
+                        let name = path
+                            .file_name()
+                            .and_then(|n| n.to_str())
+                            .unwrap_or("?");
+                        errors.push(format!("{name}: {e}"));
+                    }
                 }
+            }
+            if added > 0 || skipped > 0 {
+                sync_sessions_for_window(&weak, &store.borrow(), &sessions_model);
+                registry.broadcast_config_changed();
+            }
+            if let Some(w) = weak.upgrade() {
+                let mut hint = if added > 0 || skipped > 0 || errors.is_empty() {
+                    format!(
+                        "{} {} / {} {}",
+                        t("已导入", "imported"),
+                        added,
+                        t("跳过重复", "skipped"),
+                        skipped
+                    )
+                } else {
+                    t("导入失败", "import failed").to_string()
+                };
+                if paths.len() > 1 {
+                    hint.push_str(&format!(
+                        " · {} {}",
+                        paths.len(),
+                        t("个文件", "files")
+                    ));
+                }
+                if !errors.is_empty() {
+                    hint.push_str(" · ");
+                    hint.push_str(t("失败", "failed"));
+                    hint.push_str(": ");
+                    hint.push_str(&errors.join("; "));
+                }
+                w.set_ssh_import_hint(hint.into());
             }
         });
     }
