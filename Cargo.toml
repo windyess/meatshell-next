@@ -1,6 +1,6 @@
 [package]
 name = "meatshell"
-version = "0.7.7"
+version = "0.7.8"
 edition = "2021"
 authors = ["meatshell contributors"]
 description = "A lightweight FinalShell-style SSH/terminal client written in Rust + Slint"
@@ -18,7 +18,7 @@ depends = "$auto"
 # (freerdp3-x11 on Debian/Ubuntu 24.04+, freerdp2-x11 on older releases). The
 # Flatpak bundle builds FreeRDP in, so it needs nothing from the host.
 recommends = ["freerdp3-x11 | freerdp2-x11"]
-# 包分类和优先级
+# 鍖呭垎绫诲拰浼樺厛绾?
 section = "net"
 priority = "optional"
 assets = [
@@ -40,7 +40,7 @@ slint = { version = "=1.16.1", default-features = false, features = ["std", "bac
 # ICU4X (pulled in by Slint's text layout) spams stderr with raw `eprintln!`
 # ("ICU4X data error: No segmentation model for language: ja") because its
 # `log` shim falls back to eprintln when the `logging` feature is off. Turning
-# `logging` on routes those through the real `log` crate 鈫?our tracing
+# `logging` on routes those through the real `log` crate 閳?our tracing
 # subscriber, where init_tracing silences the `icu_provider` target.
 icu_provider = { version = "2", features = ["logging"] }
 # Direct access to the winit window/events (OS file-drop for drag-and-drop upload).
@@ -62,8 +62,8 @@ uuid = { version = "1", features = ["v4", "serde"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "io-util", "net", "time", "fs", "signal"] }
 # Pinned to 0.49: RUSTSEC-2026-0154 (an unbounded-allocation DoS in russh's
 # ssh-AGENT frame parsing) is fixed only in >= 0.60.3, which drags in pre-release
-# crypto crates (ed25519-dalek 3.0.0-pre, aes-gcm 0.11.0-rc, 鈥?. meatshell never
-# uses the ssh-agent, so the advisory is not reachable here 鈥?see audit.toml.
+# crypto crates (ed25519-dalek 3.0.0-pre, aes-gcm 0.11.0-rc, 閳?. meatshell never
+# uses the ssh-agent, so the advisory is not reachable here 閳?see audit.toml.
 # Revisit the upgrade once russh's deps leave the -rc channel (cf. PR #151).
 russh = "0.49"
 russh-keys = "0.49"
@@ -79,7 +79,7 @@ vt100 = "0.16.2"
 portable-pty = "0.8"
 # East Asian width detection for terminal copy/find column math. Pinned to the
 # same version vt100 uses so "is this glyph 2 cells wide?" agrees with how vt100
-# lays CJK glyphs on the grid 鈥?otherwise selection/find columns drift (#132).
+# lays CJK glyphs on the grid 閳?otherwise selection/find columns drift (#132).
 unicode-width = "0.2.1"
 # Split terminal output into complete emoji grapheme clusters (ZWJ sequences,
 # flags, skin tones, variation selectors) before replacing them with images.
@@ -158,7 +158,7 @@ jemallocator = "0.5"
 
 # Compile the Skia renderer in *only* on macOS (feature is additive over the base
 # slint dependency) so users can opt into it at launch with SLINT_BACKEND=winit-skia.
-# The default stays femtovg 鈥?see the renderer history note in main.rs (#108/#129).
+# The default stays femtovg 閳?see the renderer history note in main.rs (#108/#129).
 # Windows/Linux never compile Skia; on Windows it conflicts with another ICU
 # import library at link time when using the MSVC toolchain (#224).
 [target.'cfg(target_os = "macos")'.dependencies]
@@ -192,7 +192,7 @@ ttf-parser = "0.20"
 [target.'cfg(windows)'.build-dependencies]
 winresource = "0.1"
 
-# Win32 COM APIs for the taskbar jump list ("新建窗口" task, see
+# Win32 COM APIs for the taskbar jump list ("鏂板缓绐楀彛" task, see
 # src/app/jump_list.rs). 0.58 matches the version already in Cargo.lock via
 # transitive deps, keeping the lock diff minimal.
 [target.'cfg(windows)'.dependencies]
