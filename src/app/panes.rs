@@ -31,6 +31,7 @@ pub(super) fn save_layout(
     s.set_welcome_sidebar_width(win.get_welcome_sidebar_width());
     s.set_welcome_sidebar_dock(win.get_welcome_sidebar_dock().to_string());
     s.set_welcome_collapsed(win.get_welcome_collapsed());
+    s.set_welcome_pinned(win.get_welcome_pinned());
     // A maximized size isn't a useful "preferred" size to restore to, so only
     // remember the windowed size. Ask the native window too, because the Slint
     // property can lag during startup/shutdown on frameless Windows (#234).

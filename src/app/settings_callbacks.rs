@@ -361,6 +361,7 @@ pub(super) fn wire_layout_prefs(ctx: &WinCtx) {
         window.set_welcome_sidebar_width(s.welcome_sidebar_width());
         window.set_welcome_sidebar_dock(welcome_sidebar_dock.into());
         window.set_welcome_collapsed(welcome_collapsed);
+        window.set_welcome_pinned(s.welcome_pinned());
         window.set_sidebar_collapsed(sidebar_collapsed);
         window.set_wallpaper_overlay(s.wallpaper_overlay());
         window.set_term_wallpaper_overlay(s.term_wallpaper_overlay());
@@ -458,6 +459,14 @@ pub(super) fn wire_layout_prefs(ctx: &WinCtx) {
         window.on_set_welcome_collapsed(move |v| {
             let mut s = store.borrow_mut();
             s.set_welcome_collapsed(v);
+            let _ = s.save();
+        });
+    }
+    {
+        let store = store.clone();
+        window.on_set_welcome_pinned(move |v| {
+            let mut s = store.borrow_mut();
+            s.set_welcome_pinned(v);
             let _ = s.save();
         });
     }

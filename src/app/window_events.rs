@@ -226,6 +226,23 @@ pub(super) fn install_window_event_hook(
                     WEvent::Focused(f) => {
                         focused = *f;
                         apply_activity(focused, minimized, occluded);
+                        if !*f {
+                            if let Some(win) = weak.upgrade() {
+                                if win.get_welcome_as_sidebar()
+                                    && !win.get_welcome_collapsed()
+                                    && !win.get_welcome_pinned()
+                                    && !win.get_zen_mode()
+                                {
+                                    win.set_welcome_collapsed(true);
+                                    {
+                                        let mut s = ev_store.borrow_mut();
+                                        s.set_welcome_collapsed(true);
+                                        let _ = s.save();
+                                    }
+                                    win.invoke_dock_layout_changed();
+                                }
+                            }
+                        }
                         if *f {
                             #[cfg(target_os = "windows")]
                             slint_window.with_winit_window(|window| window.set_ime_allowed(true));
