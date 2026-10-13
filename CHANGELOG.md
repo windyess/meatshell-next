@@ -5,6 +5,9 @@ All notable changes are documented here. 本文件记录所有重要变更。
 
 ## Unreleased
 
+- **启动时默认展开快速连接。** 不再恢复上次自动收起后的折叠状态；未固定时点击其他区域仍会收起。
+- **Open Quick Connect expanded on startup.** The last auto-hide collapsed state is not restored; unpinned, it still collapses after a click elsewhere.
+
 ## [0.7.9] - 2026-10-13
 
 - **快速连接未固定时自动收起。** 侧栏标题栏增加固定按钮。未固定时，单击终端/标签区域、连接会话，或切到其他窗口，都会收起快速连接；固定后保持展开。

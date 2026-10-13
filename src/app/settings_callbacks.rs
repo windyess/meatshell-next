@@ -311,7 +311,12 @@ pub(super) fn wire_layout_prefs(ctx: &WinCtx) {
         let quick_panel_dock = s.quick_panel_dock();
         let welcome_sidebar_dock = s.welcome_sidebar_dock();
         let mut sidebar_collapsed = s.sidebar_collapsed().unwrap_or(collapse_sidebar);
-        let mut welcome_collapsed = s.welcome_collapsed().unwrap_or(false);
+        // Unpinned auto-hide must not restore a folded strip on the next
+        // launch. Pinned layouts keep the last expand/collapse choice.
+        let mut welcome_collapsed = s
+            .welcome_pinned()
+            .then(|| s.welcome_collapsed().unwrap_or(false))
+            .unwrap_or(false);
         if welcome_as_sidebar
             && sidebar_dock == welcome_sidebar_dock
             && !sidebar_collapsed
