@@ -714,6 +714,9 @@ export component AppWindow inherits Window {
     // Welcome sidebar collapsed to the edge icon strip (IDEA-style), persisted.
     in-out property <bool> welcome-collapsed: false;
     callback set-welcome-collapsed(bool);          // apply + persist
+    // Keep Quick Connect expanded when clicking the terminal or another window.
+    in-out property <bool> welcome-pinned: false;
+    callback set-welcome-pinned(bool);
     in-out property <bool> collapse-sftp-default: false;
     callback set-collapse-sftp-default(bool);      // apply + persist
     in-out property <bool> sftp-collapsed: false;       // (legacy global; per-tab now)
@@ -2328,6 +2331,23 @@ export component AppWindow inherits Window {
                         }
             }
 
+            // Unpinned Quick Connect: a click in the terminal / tab area
+            // collapses the session list. Docked panels sit above this so
+            // interacting with Quick Connect itself does not hide it.
+            if root.welcome-as-sidebar && !root.welcome-collapsed && !root.welcome-pinned && !root.zen-mode : TouchArea {
+                x: rest.x;
+                y: rest.y;
+                width: rest.width;
+                height: rest.height;
+                pointer-event(ev) => {
+                    if (ev.kind == PointerEventKind.down && !root.panel-dragging) {
+                        root.welcome-collapsed = true;
+                        root.set-welcome-collapsed(true);
+                        root.dock-layout-changed();
+                    }
+                }
+            }
+
             // Stacked docked panels (#dock-stack): every expanded panel is
             // placed here at the absolute rect Rust computed, so multiple
             // panels can share one edge (split by the dividers below). `if`
@@ -2396,6 +2416,7 @@ export component AppWindow inherits Window {
                     height: parent.height;
                     compact: true;
                     dock-edge: gp.edge;
+                    pinned <=> root.welcome-pinned;
                     sessions: root.sessions;
                     import-hint: root.ssh-import-hint;
                     search-query <=> root.host-search-query;
@@ -2405,6 +2426,10 @@ export component AppWindow inherits Window {
                         root.welcome-collapsed = true;
                         root.set-welcome-collapsed(true);
                         root.dock-layout-changed();
+                    }
+                    toggle-pin => {
+                        root.welcome-pinned = !root.welcome-pinned;
+                        root.set-welcome-pinned(root.welcome-pinned);
                     }
                     dock-drag-move(ax, ay) => {
                         root.panel-dragging = true;
@@ -2421,7 +2446,14 @@ export component AppWindow inherits Window {
                     }
                     new-session => { root.new-session-clicked(); }
                     import-ssh-config => { root.import-ssh-config(); }
-                    connect-session(id) => { root.connect-session(id); }
+                    connect-session(id) => {
+                        root.connect-session(id);
+                        if (!root.welcome-pinned) {
+                            root.welcome-collapsed = true;
+                            root.set-welcome-collapsed(true);
+                            root.dock-layout-changed();
+                        }
+                    }
                     edit-session(id) => { root.edit-session(id); }
                     duplicate-session(id) => { root.duplicate-session(id); }
                     move-session(id, group) => { root.move-session(id, group); }

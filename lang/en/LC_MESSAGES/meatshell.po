@@ -444,6 +444,12 @@ msgstr "A lightweight and efficient Rust + Slint SSH client"
 msgid "Quick connect"
 msgstr "Quick connect"
 
+msgid "Pin Quick Connect"
+msgstr "Pin Quick Connect"
+
+msgid "Unpin Quick Connect"
+msgstr "Unpin Quick Connect"
+
 msgid "+ New session"
 msgstr "+ New session"
 

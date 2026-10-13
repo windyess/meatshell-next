@@ -1347,6 +1347,12 @@ impl ConfigStore {
     pub fn set_welcome_collapsed(&mut self, v: bool) {
         self.cache.welcome_collapsed = Some(v);
     }
+    pub fn welcome_pinned(&self) -> bool {
+        self.cache.welcome_pinned
+    }
+    pub fn set_welcome_pinned(&mut self, v: bool) {
+        self.cache.welcome_pinned = v;
+    }
     /// Whether the startup new-version check is enabled (#184).
     pub fn update_check_enabled(&self) -> bool {
         !self.cache.update_check_disabled

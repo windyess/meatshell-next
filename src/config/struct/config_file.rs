@@ -302,6 +302,11 @@ pub struct ConfigFile {
     /// None means the user has not explicitly collapsed/expanded it yet.
     #[serde(default)]
     pub welcome_collapsed: Option<bool>,
+    /// Keep the Quick Connect sidebar expanded when clicking elsewhere.
+    /// Unpinned (default): collapse on an outside click or when the window
+    /// loses focus.
+    #[serde(default)]
+    pub welcome_pinned: bool,
     /// Frosted-panel opacity over a wallpaper (0.0–1.00); user-adjustable via the
     /// Interface › Wallpaper opacity slider.
     #[serde(default = "default_wallpaper_overlay")]

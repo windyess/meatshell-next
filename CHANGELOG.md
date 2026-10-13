@@ -5,6 +5,9 @@ All notable changes are documented here. 本文件记录所有重要变更。
 
 ## Unreleased
 
+- **快速连接未固定时自动收起。** 侧栏标题栏增加固定按钮。未固定时，单击终端/标签区域、连接会话，或切到其他窗口，都会收起快速连接；固定后保持展开。
+- **Auto-hide unpinned Quick Connect.** The sidebar header has a pin button. Unpinned, it collapses when you click the terminal/tab area, connect a session, or switch to another window; pinned, it stays open.
+
 - **加快日常编译。** `cargo run` 的依赖不再带完整 debug 信息；新增 `release-fast` 配置（无 LTO）和 `cargo run-fast` 别名。Windows 链接改用自带的 rust-lld。发版仍用原来的 `--release`。
 - **Faster local builds.** Dev-profile dependencies no longer carry full debug info; add a `release-fast` profile (no LTO) and a `cargo run-fast` alias. Windows links with the bundled rust-lld. Shipping still uses `--release`.
 
