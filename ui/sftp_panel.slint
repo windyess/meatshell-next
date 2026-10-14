@@ -21,30 +21,30 @@ export struct SftpEntry {
     owner: string,
     group: string,
     selected: bool,   // multi-select checkbox state (#100)
-    // Bundled Fluent file-type icon key (folder/image/pdf/…).
+    // Bundled Windows Explorer file-type icon key (folder/image/pdf/…).
     icon-kind: string,
 }
 
-// Name-column thumbnail: Fluent System Icons SVGs under assets/file-icons.
+// Name-column icon: Windows shell icons extracted into assets/file-icons/*.png
 component SftpFileIcon inherits Image {
     in property <string> kind;
     width: 16px;
     height: 16px;
-    source: root.kind == "folder" ? @image-url("../assets/file-icons/folder.svg")
-        : root.kind == "link" ? @image-url("../assets/file-icons/link.svg")
-        : root.kind == "image" ? @image-url("../assets/file-icons/image.svg")
-        : root.kind == "video" ? @image-url("../assets/file-icons/video.svg")
-        : root.kind == "audio" ? @image-url("../assets/file-icons/audio.svg")
-        : root.kind == "archive" ? @image-url("../assets/file-icons/archive.svg")
-        : root.kind == "pdf" ? @image-url("../assets/file-icons/pdf.svg")
-        : root.kind == "code" ? @image-url("../assets/file-icons/code.svg")
-        : root.kind == "document" ? @image-url("../assets/file-icons/document.svg")
-        : root.kind == "table" ? @image-url("../assets/file-icons/table.svg")
-        : root.kind == "config" ? @image-url("../assets/file-icons/config.svg")
-        : root.kind == "text" ? @image-url("../assets/file-icons/text.svg")
-        : root.kind == "terminal" ? @image-url("../assets/file-icons/terminal.svg")
-        : root.kind == "exe" ? @image-url("../assets/file-icons/exe.svg")
-        : @image-url("../assets/file-icons/file.svg");
+    source: root.kind == "folder" ? @image-url("../assets/file-icons/folder.png")
+        : root.kind == "link" ? @image-url("../assets/file-icons/link.png")
+        : root.kind == "image" ? @image-url("../assets/file-icons/image.png")
+        : root.kind == "video" ? @image-url("../assets/file-icons/video.png")
+        : root.kind == "audio" ? @image-url("../assets/file-icons/audio.png")
+        : root.kind == "archive" ? @image-url("../assets/file-icons/archive.png")
+        : root.kind == "pdf" ? @image-url("../assets/file-icons/pdf.png")
+        : root.kind == "code" ? @image-url("../assets/file-icons/code.png")
+        : root.kind == "document" ? @image-url("../assets/file-icons/document.png")
+        : root.kind == "table" ? @image-url("../assets/file-icons/table.png")
+        : root.kind == "config" ? @image-url("../assets/file-icons/config.png")
+        : root.kind == "text" ? @image-url("../assets/file-icons/text.png")
+        : root.kind == "terminal" ? @image-url("../assets/file-icons/terminal.png")
+        : root.kind == "exe" ? @image-url("../assets/file-icons/exe.png")
+        : @image-url("../assets/file-icons/file.png");
 }
 
 export struct SftpTreeNode {

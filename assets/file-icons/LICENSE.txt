@@ -1,6 +1,7 @@
-Fluent System Icons
-Copyright (c) Microsoft Corporation
-Licensed under the MIT License:
+SFTP name-column icons (`*.png`) are 32×32 association icons extracted from
+the local Windows Shell (`SHGetFileInfo`) via `extract_win_icons.py`, so the
+list matches Explorer without calling the shell at runtime.
+
+The older `*.svg` files (if still present) are Fluent System Icons:
+Copyright (c) Microsoft Corporation, MIT License
 https://github.com/microsoft/fluentui-system-icons/blob/main/LICENSE
-Icons in this folder are taken from fluentui-system-icons (filled 24px SVGs),
-with fill colours adjusted for file-type distinction in meatshell.

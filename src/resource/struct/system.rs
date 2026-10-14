@@ -18,6 +18,8 @@ pub struct SystemSnapshot {
     pub net_bytes_per_sec: u64,
     pub net_rx_per_sec: u64,
     pub net_tx_per_sec: u64,
+    /// IPv4 of the busiest non-loopback local NIC (empty if none).
+    pub net_ip: String,
     /// Per-filesystem (mount, available_bytes, total_bytes).
     pub disks: Vec<(String, u64, u64)>,
 }
@@ -47,6 +49,8 @@ pub(crate) struct TabStatus {
     pub(crate) swap_used_kib: u64,
     pub(crate) swap_total_kib: u64,
     pub(crate) net: Vec<(String, u64, u64)>,
+    /// Per-interface IPv4 from the remote monitor (`iface -> addr`).
+    pub(crate) net_ips: std::collections::HashMap<String, String>,
     pub(crate) selected_iface: String,
     pub(crate) net_hist: Vec<f32>,
     pub(crate) disks: Vec<(String, u64, u64)>,

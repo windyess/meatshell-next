@@ -5,6 +5,14 @@ All notable changes are documented here. 本文件记录所有重要变更。
 
 ## Unreleased
 
+## [0.7.11] - 2026-10-14
+
+- **运行状态网卡速率下方显示对应 IPv4。** 远端为当前选中网卡地址，本机为当前最活跃非回环网卡地址。
+- **Status panel shows the NIC IPv4 under each throughput graph.** Remote uses the selected interface; local uses the busiest non-loopback adapter.
+
+- **SFTP 文件图标改为打包进项目的 Windows 资源管理器图标。** `assets/file-icons/*.png` 从本机 Shell 导出，按扩展名显示文件夹 / PDF / 图片等；不再运行时询问系统。
+- **SFTP file icons ship Windows Explorer association PNGs.** Icons in `assets/file-icons/*.png` are extracted from the local shell and chosen by extension; the app no longer queries the shell at runtime.
+
 ## [0.7.10] - 2026-10-14
 
 - **导入连接支持一次多选多个 JSON。** 设置菜单「导入连接」的文件对话框可多选；成功数与跳过数合计，某个文件失败不影响其余文件。

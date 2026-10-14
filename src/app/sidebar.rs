@@ -62,11 +62,13 @@ pub(super) fn refresh_sidebar(
     // --- Bottom network graph: always the local machine --------------------
     win.set_net_bot_up(format_bytes_per_sec(snap.net_tx_per_sec).into());
     win.set_net_bot_down(format_bytes_per_sec(snap.net_rx_per_sec).into());
+    win.set_net_bot_ip(snap.net_ip.clone().into());
     win.set_net_bot_history(normalized_model(&local_net_hist.lock().unwrap()));
 
     let set_top_local = |win: &AppWindow| {
         win.set_net_top_up(format_bytes_per_sec(snap.net_tx_per_sec).into());
         win.set_net_top_down(format_bytes_per_sec(snap.net_rx_per_sec).into());
+        win.set_net_top_ip(snap.net_ip.clone().into());
         win.set_net_top_history(normalized_model(&local_net_hist.lock().unwrap()));
         win.set_net_show_selector(false);
         win.set_net_selected("".into());
@@ -265,6 +267,13 @@ pub(super) fn refresh_sidebar(
             let (name, rx, tx) = selected_iface(&st);
             win.set_net_top_up(format_bytes_per_sec(tx).into());
             win.set_net_top_down(format_bytes_per_sec(rx).into());
+            win.set_net_top_ip(
+                st.net_ips
+                    .get(&name)
+                    .cloned()
+                    .unwrap_or_default()
+                    .into(),
+            );
             win.set_net_top_history(normalized_model(&st.net_hist));
             win.set_net_show_selector(!st.net.is_empty());
             win.set_net_selected(name.into());

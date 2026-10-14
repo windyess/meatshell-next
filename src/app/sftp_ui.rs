@@ -1,6 +1,6 @@
 use super::*;
 
-/// Fluent file-type icon key for the SFTP name column (see `assets/file-icons`).
+/// Bundled Windows Explorer file-type icon key (see `assets/file-icons/*.png`).
 pub(super) fn sftp_entry_icon_kind(
     name: &str,
     is_dir: bool,

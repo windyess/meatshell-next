@@ -3,6 +3,7 @@
 //! `sysinfo` is already a dependency for many Rust desktop apps; it gives us
 //! cross-platform data with ~2% CPU overhead at 1-second cadence.
 
+use std::net::IpAddr;
 use std::time::Duration;
 
 use sysinfo::{Disks, Networks, System};
@@ -72,6 +73,8 @@ impl SystemSampler {
         let net_rx_per_sec = (rx_delta as f64 / elapsed) as u64;
         let net_tx_per_sec = (tx_delta as f64 / elapsed) as u64;
 
+        let net_ip = local_nic_ipv4(&self.nets);
+
         // Local filesystems (slow-changing, but cheap to refresh).
         self.disks.refresh(true);
         let disks: Vec<(String, u64, u64)> = self
@@ -98,9 +101,40 @@ impl SystemSampler {
             net_bytes_per_sec: net_rx_per_sec + net_tx_per_sec,
             net_rx_per_sec,
             net_tx_per_sec,
+            net_ip,
             disks,
         }
     }
+}
+
+fn nic_ipv4(data: &sysinfo::NetworkData) -> Option<String> {
+    data.ip_networks().iter().find_map(|n| match n.addr {
+        IpAddr::V4(v) if !v.is_loopback() && !v.is_link_local() => Some(v.to_string()),
+        _ => None,
+    })
+}
+
+fn local_nic_ipv4(nets: &Networks) -> String {
+    let mut fallback = String::new();
+    let mut best: Option<(u64, String)> = None;
+    for (name, data) in nets.iter() {
+        let lname = name.to_ascii_lowercase();
+        if lname == "lo" || lname.starts_with("loopback") {
+            continue;
+        }
+        let Some(ip) = nic_ipv4(data) else {
+            continue;
+        };
+        if fallback.is_empty() {
+            fallback = ip.clone();
+        }
+        let traffic = data.received().saturating_add(data.transmitted());
+        match best {
+            Some((t, _)) if t >= traffic => {}
+            _ => best = Some((traffic, ip)),
+        }
+    }
+    best.map(|(_, ip)| ip).unwrap_or(fallback)
 }
 
 /// Format a used/total memory pair (both in MiB) for the narrow sidebar.

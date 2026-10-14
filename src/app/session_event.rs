@@ -145,6 +145,7 @@ pub(super) fn apply_session_event_to_window(
             swap_used_kib,
             swap_total_kib,
             net,
+            net_ips,
             disks,
             current_user: _,
             procs: _,
@@ -157,6 +158,7 @@ pub(super) fn apply_session_event_to_window(
                 st.swap_used_kib = swap_used_kib;
                 st.swap_total_kib = swap_total_kib;
                 st.net = net;
+                st.net_ips = net_ips;
                 st.disks = disks;
                 if let Some(sys) = sys {
                     st.sys = sys;

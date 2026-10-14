@@ -64,6 +64,8 @@ pub enum SessionEvent {
         swap_total_kib: u64,
         /// Per-interface (name, rx_bytes_per_sec, tx_bytes_per_sec).
         net: Vec<(String, u64, u64)>,
+        /// Per-interface IPv4 (`iface -> addr`), empty when `ip` is unavailable.
+        net_ips: std::collections::HashMap<String, String>,
         /// Per-filesystem (mount_point, available_bytes, total_bytes).
         disks: Vec<(String, u64, u64)>,
         /// Effective login name reported by the remote host (`id -un`).

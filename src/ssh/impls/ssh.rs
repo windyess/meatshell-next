@@ -1780,7 +1780,7 @@ async fn run_session(
     // pid/user/pcpu/pmem/args, each line clipped to 200 chars so a giant command
     // line can't bloat the stream. A host whose `ps` lacks `--sort`/`-o` simply
     // yields nothing (2>/dev/null), degrading to an empty process list.
-    const MON_CMD: &[u8] = b"PATH=/usr/bin:/bin:/usr/sbin:/sbin; export PATH; while :; do awk '/^cpu /{print}' /proc/stat; awk '/^(MemTotal|MemAvailable|SwapTotal|SwapFree|Buffers|Cached):/{print}' /proc/meminfo; cat /proc/net/dev; echo __DF__; df -kP 2>/dev/null; echo __MSTICK__; sleep 2; done\n";
+    const MON_CMD: &[u8] = b"PATH=/usr/bin:/bin:/usr/sbin:/sbin; export PATH; while :; do awk '/^cpu /{print}' /proc/stat; awk '/^(MemTotal|MemAvailable|SwapTotal|SwapFree|Buffers|Cached):/{print}' /proc/meminfo; cat /proc/net/dev; echo __ADDR__; ip -o -4 addr show 2>/dev/null | awk '{print $2,$4}'; echo __DF__; df -kP 2>/dev/null; echo __MSTICK__; sleep 2; done\n";
     // Detailed system information is intentionally one-shot and last priority.
     // It includes commands such as lspci/hostname that may be slow on some hosts
     // and must never delay either the terminal or the lightweight sidebar sample.
@@ -2428,8 +2428,11 @@ fn parse_monitor_block(
     let mut sys_kv: std::collections::HashMap<String, String> = std::collections::HashMap::new();
     // The sample is split into sections by `echo` markers; everything before the
     // first marker is the cpu/mem/net block.
+    let mut net_ips: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
     enum Section {
         Top,
+        Addr,
         Df,
         Me,
         Ps,
@@ -2443,6 +2446,10 @@ fn parse_monitor_block(
     const MAX_MON_ENTRIES: usize = 64;
 
     for line in block.lines() {
+        if line == "__ADDR__" {
+            section = Section::Addr;
+            continue;
+        }
         if line == "__DF__" {
             section = Section::Df;
             continue;
@@ -2460,6 +2467,14 @@ fn parse_monitor_block(
             continue;
         }
         match section {
+            Section::Addr => {
+                if net_ips.len() < MAX_MON_ENTRIES {
+                    if let Some((iface, ip)) = parse_addr_line(line) {
+                        net_ips.entry(iface).or_insert(ip);
+                    }
+                }
+                continue;
+            }
             Section::Df => {
                 if disks.len() < MAX_MON_ENTRIES {
                     if let Some((mount, avail, total)) = parse_df_line(line) {
@@ -2596,6 +2611,7 @@ fn parse_monitor_block(
         swap_used_kib: swap_total.saturating_sub(swap_free),
         swap_total_kib: swap_total,
         net,
+        net_ips,
         disks,
         current_user,
         procs,
@@ -2819,6 +2835,23 @@ fn parse_meminfo_kib(s: &str) -> u64 {
 /// Format: `  eth0: <rx_bytes> <rx_pkts> ... <tx_bytes> <tx_pkts> ...`
 /// (16 numeric columns; rx_bytes is col 0, tx_bytes is col 8).  The `lo`
 /// loopback interface is skipped — it never reflects real traffic.
+/// One `ip -o -4 addr` awk line: `enp23s0 10.8.0.1/24` (iface may be `veth@if3`).
+fn parse_addr_line(line: &str) -> Option<(String, String)> {
+    let mut parts = line.split_whitespace();
+    let iface = parts.next()?.trim();
+    let cidr = parts.next()?.trim();
+    let iface = iface.split('@').next().unwrap_or(iface);
+    if iface.is_empty() || iface == "lo" {
+        return None;
+    }
+    let ip = cidr.split('/').next().unwrap_or(cidr);
+    let addr: std::net::Ipv4Addr = ip.parse().ok()?;
+    if addr.is_loopback() {
+        return None;
+    }
+    Some((iface.to_string(), addr.to_string()))
+}
+
 fn parse_net_dev_line(line: &str) -> Option<(String, (u64, u64))> {
     let (name, rest) = line.split_once(':')?;
     let iface = name.trim();
@@ -3456,6 +3489,23 @@ mod monitor_hardening_tests {
         let event = parse_monitor_block(block, &mut prev, &mut prev_net, &mut at).unwrap();
         match event {
             super::SessionEvent::ResourceStats { sys, .. } => assert!(sys.is_none()),
+            other => panic!("unexpected event: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn monitor_parses_iface_ipv4() {
+        let block = "MemTotal: 1000 kB\nMemAvailable: 500 kB\n__ADDR__\nenp23s0 10.8.0.1/24\nlo 127.0.0.1/8\nveth0@if12 172.17.0.2/16\n__DF__\n";
+        let mut prev = None;
+        let mut prev_net = HashMap::new();
+        let mut at = Instant::now();
+        let event = parse_monitor_block(block, &mut prev, &mut prev_net, &mut at).unwrap();
+        match event {
+            super::SessionEvent::ResourceStats { net_ips, .. } => {
+                assert_eq!(net_ips.get("enp23s0").map(String::as_str), Some("10.8.0.1"));
+                assert_eq!(net_ips.get("veth0").map(String::as_str), Some("172.17.0.2"));
+                assert!(!net_ips.contains_key("lo"));
+            }
             other => panic!("unexpected event: {other:?}"),
         }
     }

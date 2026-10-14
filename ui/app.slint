@@ -374,9 +374,11 @@ export component AppWindow inherits Window {
     // session tab, local on the welcome tab); "bot" is always the local machine.
     in property <string> net-top-up;        // ↑ tx rate text
     in property <string> net-top-down;      // ↓ rx rate text
+    in property <string> net-top-ip;        // selected remote (or local) NIC IPv4
     in property <[float]> net-top-history;
     in property <string> net-bot-up;
     in property <string> net-bot-down;
+    in property <string> net-bot-ip;        // local NIC IPv4
     in property <[float]> net-bot-history;
     in property <[string]> net-ifaces;      // remote NIC names for the selector
     in property <string> net-selected;      // currently selected NIC
@@ -1734,9 +1736,11 @@ export component AppWindow inherits Window {
                 swap-detail: root.swap-detail;
                 net-top-up: root.net-top-up;
                 net-top-down: root.net-top-down;
+                net-top-ip: root.net-top-ip;
                 net-top-history: root.net-top-history;
                 net-bot-up: root.net-bot-up;
                 net-bot-down: root.net-bot-down;
+                net-bot-ip: root.net-bot-ip;
                 net-bot-history: root.net-bot-history;
                 net-ifaces: root.net-ifaces;
                 net-selected: root.net-selected;
@@ -2377,9 +2381,11 @@ export component AppWindow inherits Window {
                     swap-detail: root.swap-detail;
                     net-top-up: root.net-top-up;
                     net-top-down: root.net-top-down;
+                    net-top-ip: root.net-top-ip;
                     net-top-history: root.net-top-history;
                     net-bot-up: root.net-bot-up;
                     net-bot-down: root.net-bot-down;
+                    net-bot-ip: root.net-bot-ip;
                     net-bot-history: root.net-bot-history;
                     net-ifaces: root.net-ifaces;
                     net-selected: root.net-selected;
