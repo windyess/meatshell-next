@@ -1,4 +1,5 @@
 use super::*;
+use crate::ssh::command_is_cd;
 
 /// When a firehose queue contains stale output ahead of its terminal `Closed`
 /// event, keep the close notification and discard the obsolete output. The
@@ -161,6 +162,9 @@ pub(super) fn start_session_in_tab(tab_id: &str, session: Session, ctx: &Connect
             // This survives drain batches, so a stream of small events cannot
             // evade the frame checkpoint merely because of thread timing.
             let mut ingested_since_checkpoint = 0usize;
+            // Last OSC-697 command from the shell hook; follow-cd only reacts
+            // when this is a `cd` (not ls, git, etc.).
+            let mut last_shell_cmd = String::new();
             loop {
                 // Block for the first event, then sweep up everything else that's
                 // already queued. A burst — e.g. `tail -f` on a busy log (#171) —
@@ -227,12 +231,21 @@ pub(super) fn start_session_in_tab(tab_id: &str, session: Session, ctx: &Connect
                             }
                             ui_batch.push(SessionEvent::Connected);
                         }
+                        SessionEvent::CommandRan(cmd) => {
+                            last_shell_cmd = cmd.clone();
+                            ui_batch.push(SessionEvent::CommandRan(cmd));
+                        }
                         SessionEvent::CwdChanged(cwd) => {
-                            // Shared map (not a thread-local) so manual SFTP
-                            // navigation can clear the entry — then the very next
-                            // OSC 7, same directory or not, snaps the panel back to
-                            // the shell's cwd. Unchanged repeats (every prompt
-                            // re-emits OSC 7) are ignored (#59).
+                            // Only `cd` moves the SFTP panel. Other commands still
+                            // emit OSC 7 (every prompt), and manual browsing used
+                            // to snap back on the next `ls` because last_cwd was
+                            // cleared. Unchanged `cd` repeats are ignored (#59).
+                            if !rt.follow_cd.load(std::sync::atomic::Ordering::Relaxed)
+                                || !command_is_cd(&last_shell_cmd)
+                            {
+                                continue;
+                            }
+                            last_shell_cmd.clear();
                             let changed = match rt.sftp_last_cwd.lock() {
                                 Ok(mut m) => {
                                     m.insert(tab_id_pump.clone(), cwd.clone()).as_deref()
@@ -240,11 +253,10 @@ pub(super) fn start_session_in_tab(tab_id: &str, session: Session, ctx: &Connect
                                 }
                                 Err(_) => false,
                             };
-                            // Swallow when follow-cd is off: forwarding it would set
-                            // sftp_loading without any ListDir to clear it (the #59
+                            // Swallow when the path is unchanged: forwarding it
+                            // would set sftp_loading without a ListDir (the #59
                             // stuck-"loading" trap).
-                            if !changed || !rt.follow_cd.load(std::sync::atomic::Ordering::Relaxed)
-                            {
+                            if !changed {
                                 continue;
                             }
                             if let Some(prev) = cwd_debounce.take() {
@@ -431,6 +443,7 @@ pub(super) fn start_session_in_tab(tab_id: &str, session: Session, ctx: &Connect
 mod tests {
     use super::should_start_sftp;
     use crate::config::{Session, SessionKind};
+    use crate::ssh::command_is_cd;
 
     #[test]
     fn shell_compatibility_keeps_sftp_available() {
@@ -447,5 +460,19 @@ mod tests {
         let mut session = Session::new_empty();
         session.kind = SessionKind::Telnet;
         assert!(!should_start_sftp(&session));
+    }
+
+    #[test]
+    fn only_cd_commands_follow_sftp() {
+        assert!(command_is_cd("cd /tmp"));
+        assert!(command_is_cd("  cd"));
+        assert!(command_is_cd("builtin cd /data1"));
+        assert!(command_is_cd("command cd -- -foo"));
+        assert!(command_is_cd("\\cd /home"));
+        assert!(!command_is_cd("ls /tmp"));
+        assert!(!command_is_cd("ls"));
+        assert!(!command_is_cd("git -C /tmp status"));
+        assert!(!command_is_cd("mkdir cd"));
+        assert!(!command_is_cd(""));
     }
 }

@@ -86,9 +86,8 @@ pub(super) fn wire_sftp_callbacks(
             } else {
                 path.to_string()
             };
-            // Forget the followed cwd so the next OSC 7 — even at an unchanged
-            // directory — snaps the panel back to the shell's cwd; manual
-            // navigation never permanently disables cd-follow.
+            // Forget the followed cwd so the next real `cd` snaps the panel
+            // back to the shell; `ls` and other commands must not.
             sftp_last_cwd.lock().unwrap().remove(&tab_id);
             if let Ok(handles) = sftp_handles.lock() {
                 if let Some(h) = handles.get(&tab_id) {
@@ -366,8 +365,8 @@ pub(super) fn wire_sftp_callbacks(
         window.on_sftp_tree_expand(move |tab_id: SharedString, path: SharedString| {
             let tab_id = tab_id.to_string();
             let path = path.to_string();
-            // Forget the followed cwd (see on_sftp_navigate): tree navigation
-            // must never permanently disable cd-follow.
+            // Forget the followed cwd (see on_sftp_navigate): the next `cd`
+            // still snaps back; other commands do not.
             sftp_last_cwd.lock().unwrap().remove(&tab_id);
             if let Ok(handles) = sftp_handles.lock() {
                 if let Some(h) = handles.get(&tab_id) {

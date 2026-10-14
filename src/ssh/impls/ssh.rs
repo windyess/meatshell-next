@@ -210,7 +210,7 @@ const PROMPT_SETUP_SUFFIX: &str = "__ms7'";
 #[cfg(test)]
 const PROMPT_SETUP_HISTORY_MARKER: &str = "__MEATSHELL_INTERNAL_SETUP_1";
 const PROMPT_SETUP_DONE: &str = "\u{1b}]699;ready\u{07}";
-const PROMPT_BODY: &str = "test -z \"$FISH_VERSION\" && eval '__msc(){ __c=\"$(fc -ln -1 2>/dev/null)\"; [ -n \"$__c\" ] && [ \"$__c\" != \"$__cl\" ] && { __cl=\"$__c\"; printf \"\\033]697;%s\\007\" \"$__c\"; }; }; __ms7(){ printf \"\\033]7;file://%s%s\\007\" \"$HOSTNAME\" \"$PWD\"; __msc; }; if [ -n \"$ZSH_VERSION\" ]; then autoload -Uz add-zsh-hook 2>/dev/null; add-zsh-hook precmd __ms7; else PROMPT_COMMAND=\"__ms7${PROMPT_COMMAND:+;$PROMPT_COMMAND}\"; fi; : __MEATSHELL_INTERNAL_SETUP_1; if [ -n \"$BASH_VERSION\" ]; then __md=\"$(history 2>/dev/null | { __md=\"\"; while read -r __mn __mr; do case \"$__mr\" in *\"__ms7()\"*\"PROMPT_COMMAND=\"*) __mn=\"${__mn%\\*}\"; __md=\"$__mn $__md\";; esac; done; printf \"%s\" \"$__md\"; })\"; for __mn in $__md; do history -d \"$__mn\" 2>/dev/null; done; unset __md __mn __mr; fi; __cl=\"$(fc -ln -1 2>/dev/null)\"; printf \"\\033]699;ready\\007\"; __ms7'";
+const PROMPT_BODY: &str = "test -z \"$FISH_VERSION\" && eval '__msc(){ __c=\"$(fc -ln -1 2>/dev/null)\"; [ -n \"$__c\" ] && [ \"$__c\" != \"$__cl\" ] && { __cl=\"$__c\"; printf \"\\033]697;%s\\007\" \"$__c\"; }; }; __ms7(){ __msc; printf \"\\033]7;file://%s%s\\007\" \"$HOSTNAME\" \"$PWD\"; }; if [ -n \"$ZSH_VERSION\" ]; then autoload -Uz add-zsh-hook 2>/dev/null; add-zsh-hook precmd __ms7; else PROMPT_COMMAND=\"__ms7${PROMPT_COMMAND:+;$PROMPT_COMMAND}\"; fi; : __MEATSHELL_INTERNAL_SETUP_1; if [ -n \"$BASH_VERSION\" ]; then __md=\"$(history 2>/dev/null | { __md=\"\"; while read -r __mn __mr; do case \"$__mr\" in *\"__ms7()\"*\"PROMPT_COMMAND=\"*) __mn=\"${__mn%\\*}\"; __md=\"$__mn $__md\";; esac; done; printf \"%s\" \"$__md\"; })\"; for __mn in $__md; do history -d \"$__mn\" 2>/dev/null; done; unset __md __mn __mr; fi; __cl=\"$(fc -ln -1 2>/dev/null)\"; printf \"\\033]699;ready\\007\"; __ms7'";
 const PROMPT_SHELL_PROBE: &[u8] = b"if [ -n \"$BASH_VERSION\" ]; then printf '__MEATSHELL_SHELL__:bash\\n'; elif [ -n \"$ZSH_VERSION\" ]; then printf '__MEATSHELL_SHELL__:zsh\\n'; else printf '__MEATSHELL_SHELL__:other\\n'; fi";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -603,6 +603,102 @@ pub fn extract_osc_command(text: &str) -> Option<(String, std::ops::Range<usize>
         i = end + term_len;
     }
     None
+}
+
+/// Emit captured shell-hook events in the order follow-cd needs: the command
+/// (`OSC 697`) first, then cwd (`OSC 7`). Sequences are stripped from `text`
+/// so they never reach the renderer.
+fn emit_shell_hook_events(text: &mut String, events: &UnboundedSender<SessionEvent>) {
+    while let Some((cmd, range)) = extract_osc_command(text) {
+        text.replace_range(range, "");
+        let cmd = cmd.trim();
+        if !cmd.is_empty() && !cmd.contains("__ms7") {
+            let _ = events.send(SessionEvent::CommandRan(cmd.to_string()));
+        }
+    }
+    if let Some(cwd) = extract_osc7_path(text) {
+        tracing::debug!("OSC7 cwd={:?}", cwd);
+        let _ = events.send(SessionEvent::CwdChanged(cwd));
+    }
+}
+
+/// Reconstruct the line currently being typed into the PTY so follow-cd can
+/// see a terminal-typed `cd` even when the shell hook / history does not
+/// report it (HISTIGNORE, `set +o history`, fish, etc.).
+#[derive(Default)]
+struct TypedLineTracker {
+    buf: Vec<u8>,
+}
+
+impl TypedLineTracker {
+    fn feed(&mut self, bytes: &[u8]) -> Option<String> {
+        let mut completed = None;
+        let mut i = 0;
+        while i < bytes.len() {
+            match bytes[i] {
+                b'\r' | b'\n' => {
+                    if !self.buf.is_empty() {
+                        completed = Some(String::from_utf8_lossy(&self.buf).into_owned());
+                    }
+                    self.buf.clear();
+                    if bytes[i] == b'\r' && i + 1 < bytes.len() && bytes[i + 1] == b'\n' {
+                        i += 1;
+                    }
+                }
+                0x7f | 0x08 => self.pop_char(),
+                0x15 | 0x03 | 0x04 => self.buf.clear(),
+                0x1b => {
+                    i += 1;
+                    if i < bytes.len() && (bytes[i] == b'[' || bytes[i] == b'O') {
+                        i += 1;
+                        while i < bytes.len()
+                            && !bytes[i].is_ascii_alphabetic()
+                            && bytes[i] != b'~'
+                        {
+                            i += 1;
+                        }
+                    }
+                    continue;
+                }
+                b if b >= 0x20 => self.buf.push(b),
+                _ => {}
+            }
+            i += 1;
+        }
+        completed
+    }
+
+    fn pop_char(&mut self) {
+        while let Some(b) = self.buf.pop() {
+            if (b & 0b1100_0000) != 0b1000_0000 {
+                break;
+            }
+        }
+    }
+}
+
+/// True when the command is the `cd` builtin (optionally after `builtin` /
+/// `command` / `time`). SFTP follow-cd ignores everything else.
+pub(crate) fn command_is_cd(cmd: &str) -> bool {
+    let mut rest = cmd.trim();
+    loop {
+        rest = rest.trim_start_matches('\\').trim_start();
+        if rest.is_empty() {
+            return false;
+        }
+        let (word, after) = match rest.split_once(char::is_whitespace) {
+            Some((word, after)) => (word, after),
+            None => (rest, ""),
+        };
+        let name = word.rsplit('/').next().unwrap_or(word);
+        match name {
+            "builtin" | "command" | "time" | "noglob" | "nocorrect" | "exec" => {
+                rest = after;
+            }
+            "cd" => return true,
+            _ => return false,
+        }
+    }
 }
 
 /// Percent-decode a URL path segment (e.g. `%20` → space).
@@ -1704,6 +1800,8 @@ async fn run_session(
         session_started.elapsed().as_millis()
     );
 
+    let mut typed_line = TypedLineTracker::default();
+
     let _ = events.send(SessionEvent::Connected);
     let _ = events.send(SessionEvent::Status(format!(
         "{} {}@{}",
@@ -1897,6 +1995,13 @@ async fn run_session(
                         // Only log the byte count — never the bytes themselves,
                         // which are raw keystrokes and may contain passwords (#15).
                         tracing::debug!("ssh channel.data len={} bytes", bytes.len());
+                        if let Some(line) = typed_line.feed(&bytes) {
+                            // Do not record arbitrary typed lines (passwords).
+                            // Only a submitted `cd` is needed for SFTP follow.
+                            if command_is_cd(&line) {
+                                let _ = events.send(SessionEvent::CommandRan(line.trim().to_string()));
+                            }
+                        }
                         let bytes = terminal_encoder.encode(&bytes);
                         if let Err(err) = channel.data(&bytes[..]).await {
                             let _ = events.send(SessionEvent::Closed(format!("{}: {err}", t("写入失败", "write failed"))));
@@ -2055,11 +2160,8 @@ async fn run_session(
                                     // run them through the normal output path so
                                     // the prompt shows and the cwd updates.
                                     if !leftover.is_empty() {
-                                        let text = terminal_decoder.decode(&leftover);
-                                        if let Some(cwd) = extract_osc7_path(&text) {
-                                            let _ =
-                                                events.send(SessionEvent::CwdChanged(cwd));
-                                        }
+                                        let mut text = terminal_decoder.decode(&leftover);
+                                        emit_shell_hook_events(&mut text, &events);
                                         let _ = events.send(SessionEvent::Output(text));
                                     }
                                 }
@@ -2149,21 +2251,12 @@ async fn run_session(
                         if let Some(tail) = take_after_prompt_setup_done(&mut echo_buf) {
                             suppress_echo = false;
                             late_prompt_echo_pending = false;
-                            if let Some(cwd) = extract_osc7_path(&tail) {
-                                tracing::debug!("OSC7 cwd={:?}", cwd);
-                                let _ = events.send(SessionEvent::CwdChanged(cwd));
-                            }
                             tail
                         } else {
                                 bound_prompt_setup_echo(&mut echo_buf);
                                 continue; // keep buffering; show nothing yet
                             }
                         } else {
-                            // Scan for the OSC 7 CWD notification (cd-follow).
-                            if let Some(cwd) = extract_osc7_path(&chunk) {
-                                tracing::debug!("OSC7 cwd={:?}", cwd);
-                                let _ = events.send(SessionEvent::CwdChanged(cwd));
-                            }
                             let mut clean = chunk;
                             strip_pending_prompt_setup_echo(
                                 &mut clean,
@@ -2172,17 +2265,9 @@ async fn run_session(
                             clean
                         };
 
-                        // Capture commands run in the terminal via our OSC 697
-                        // hook, and strip the sequence so it never reaches the
-                        // renderer (#113). Skip our own injected setup line in the
-                        // rare case HISTCONTROL=ignorespace isn't in effect.
-                        while let Some((cmd, range)) = extract_osc_command(&text) {
-                            text.replace_range(range, "");
-                            let cmd = cmd.trim();
-                            if !cmd.is_empty() && !cmd.contains("__ms7") {
-                                let _ = events.send(SessionEvent::CommandRan(cmd.to_string()));
-                            }
-                        }
+                        // OSC 697 (command) before OSC 7 (cwd) so SFTP follow-cd
+                        // can tell a real `cd` from any other prompt.
+                        emit_shell_hook_events(&mut text, &events);
 
                         for (response, append_enter) in trigger_engine.feed(&text) {
                             let mut bytes = response.as_str().as_bytes().to_vec();
@@ -3218,6 +3303,36 @@ mod prompt_setup_echo_tests {
         // previous real user command does not get reported as newly executed.
         assert!(PROMPT_BODY.find("history -d").unwrap() < PROMPT_BODY.rfind("__cl=").unwrap());
         assert!(PROMPT_BODY.contains("699;ready"));
+        // Command capture must run before OSC 7 so follow-cd can require `cd`.
+        let ms7_at = PROMPT_BODY.find("__ms7(){").expect("__ms7");
+        let body = &PROMPT_BODY[ms7_at..];
+        assert!(body.find("__msc;").unwrap() < body.find("]7;file://").unwrap());
+    }
+
+    #[test]
+    fn typed_enter_captures_cd_for_follow() {
+        let mut t = super::TypedLineTracker::default();
+        assert!(t.feed(b"ls /tmp\r").is_some());
+        let line = t.feed(b"cd /data1\r").expect("line");
+        assert!(super::command_is_cd(&line));
+        assert!(t.feed(b"cd /x\x7f\x7f/tmp\r").unwrap().ends_with("/tmp"));
+        assert!(t.feed(b"secret-password\r").is_some());
+        assert!(!super::command_is_cd("secret-password"));
+    }
+
+    #[test]
+    fn only_cd_commands_follow_sftp() {
+        use super::command_is_cd;
+        assert!(command_is_cd("cd /tmp"));
+        assert!(command_is_cd("  cd"));
+        assert!(command_is_cd("builtin cd /data1"));
+        assert!(command_is_cd("command cd -- -foo"));
+        assert!(command_is_cd("\\cd /home"));
+        assert!(!command_is_cd("ls /tmp"));
+        assert!(!command_is_cd("ls"));
+        assert!(!command_is_cd("git -C /tmp status"));
+        assert!(!command_is_cd("mkdir cd"));
+        assert!(!command_is_cd(""));
     }
 
     #[test]

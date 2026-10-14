@@ -7,6 +7,9 @@ All notable changes are documented here. 本文件记录所有重要变更。
 
 ## [0.7.11] - 2026-10-14
 
+- **SFTP 跟随 cd 不再被其他命令触发。** 仅在终端执行 `cd` 时切目录（含直接在终端敲入的 `cd`）；`ls` 等命令以及手动浏览后的下一条非 cd 命令都不会把面板拽走。
+- **SFTP follow-cd only reacts to `cd`.** That includes `cd` typed in the terminal. Other commands and the next non-`cd` after a manual browse no longer move the panel.
+
 - **运行状态网卡速率下方显示对应 IPv4。** 远端为当前选中网卡地址，本机为当前最活跃非回环网卡地址。
 - **Status panel shows the NIC IPv4 under each throughput graph.** Remote uses the selected interface; local uses the busiest non-loopback adapter.
 
