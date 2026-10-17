@@ -1,5 +1,6 @@
-# Extract Windows Explorer small icons into assets/file-icons/*.png
-# so SFTP can ship them instead of calling the shell at runtime.
+# Extract Windows Explorer association icons into assets/file-icons/shell/.
+# Layer 1 (preferred) of the SFTP icon stack — see LICENSE.txt.
+# Requires Windows + Pillow. Does not run at app runtime.
 import ctypes
 from ctypes import wintypes
 from pathlib import Path
@@ -11,14 +12,51 @@ user32 = ctypes.windll.user32
 gdi32 = ctypes.windll.gdi32
 
 SHGFI_ICON = 0x000000100
-SHGFI_SMALLICON = 0x000000001
 SHGFI_USEFILEATTRIBUTES = 0x000000010
 FILE_ATTRIBUTE_NORMAL = 0x80
 FILE_ATTRIBUTE_DIRECTORY = 0x10
 DI_NORMAL = 0x0003
 BI_RGB = 0
 DIB_RGB_COLORS = 0
-SIZE = 32  # extract large-enough then display at 16px
+SIZE = 32
+
+# kind → (probe name, is_directory)
+KINDS = {
+    "folder": ("folder", True),
+    "link": ("file.lnk", False),
+    "image": ("file.png", False),
+    "video": ("file.mp4", False),
+    "audio": ("file.mp3", False),
+    "archive": ("file.zip", False),
+    "pdf": ("file.pdf", False),
+    "code": ("file.py", False),
+    "document": ("file.docx", False),
+    "table": ("file.xlsx", False),
+    "presentation": ("file.pptx", False),
+    "csv": ("file.csv", False),
+    "html": ("file.html", False),
+    "xml": ("file.xml", False),
+    "config": ("file.json", False),
+    "text": ("file.txt", False),
+    "terminal": ("file.bat", False),
+    "exe": ("file.exe", False),
+    "file": ("file", False),
+    "rtf": ("file.rtf", False),
+    "font": ("file.ttf", False),
+    "email": ("file.eml", False),
+    "dll": ("file.dll", False),
+    # Dev / Fluent-CDN gaps
+    "md": ("file.md", False),
+    "toml": ("file.toml", False),
+    "rs": ("file.rs", False),
+    "go": ("file.go", False),
+    "vue": ("file.vue", False),
+    "svelte": ("file.svelte", False),
+    "wasm": ("file.wasm", False),
+    "env": ("file.env", False),
+    "gitignore": ("file.gitignore", False),
+}
+
 
 class SHFILEINFOW(ctypes.Structure):
     _fields_ = [
@@ -84,8 +122,6 @@ def to_png(hicon: int) -> Image.Image:
 
 def extract(name: str, directory: bool) -> Image.Image:
     info = SHFILEINFOW()
-    flags = SHGFI_ICON | SHGFI_SMALLICON | SHGFI_USEFILEATTRIBUTES
-    # SMALLICON is 16; request 32 via DrawIconEx after getting the HICON.
     flags = SHGFI_ICON | SHGFI_USEFILEATTRIBUTES
     attrs = FILE_ATTRIBUTE_DIRECTORY if directory else FILE_ATTRIBUTE_NORMAL
     ok = shell32.SHGetFileInfoW(
@@ -103,26 +139,9 @@ def extract(name: str, directory: bool) -> Image.Image:
         user32.DestroyIcon(info.hIcon)
 
 
-KINDS = {
-    "folder": ("folder", True),
-    "link": ("file.lnk", False),
-    "image": ("file.png", False),
-    "video": ("file.mp4", False),
-    "audio": ("file.mp3", False),
-    "archive": ("file.zip", False),
-    "pdf": ("file.pdf", False),
-    "code": ("file.py", False),
-    "document": ("file.docx", False),
-    "table": ("file.xlsx", False),
-    "config": ("file.json", False),
-    "text": ("file.txt", False),
-    "terminal": ("file.bat", False),
-    "exe": ("file.exe", False),
-    "file": ("file", False),
-}
-
-def main():
-    out = Path(__file__).resolve().parent
+def main() -> None:
+    out = Path(__file__).resolve().parent / "shell"
+    out.mkdir(parents=True, exist_ok=True)
     for kind, (name, is_dir) in KINDS.items():
         img = extract(name, is_dir)
         dest = out / f"{kind}.png"

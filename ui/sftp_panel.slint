@@ -10,6 +10,7 @@ export struct SftpEntry {
     name: string,
     full-path: string,
     is-dir: bool,
+    is-link: bool,    // symlink — double-click navigates to the target
     size: string,
     size-bytes: float,
     modified: string,
@@ -25,28 +26,54 @@ export struct SftpEntry {
     icon-kind: string,
 }
 
-// Name-column icons: Windows shell PNGs for familiar desktop types; Fluent
-// SVGs (MIT) fill Linux-oriented gaps Windows associations don't cover well
-// (symlink, shell script, source/config, generic file).
+// Icons — see assets/file-icons/LICENSE.txt
+// shell/ Explorer (preferred) → fluent/ File Type gaps
 component SftpFileIcon inherits Image {
     in property <string> kind;
     width: 16px;
     height: 16px;
-    source: root.kind == "folder" ? @image-url("../assets/file-icons/folder.png")
-        : root.kind == "link" ? @image-url("../assets/file-icons/link.svg")
-        : root.kind == "image" ? @image-url("../assets/file-icons/image.png")
-        : root.kind == "video" ? @image-url("../assets/file-icons/video.png")
-        : root.kind == "audio" ? @image-url("../assets/file-icons/audio.png")
-        : root.kind == "archive" ? @image-url("../assets/file-icons/archive.png")
-        : root.kind == "pdf" ? @image-url("../assets/file-icons/pdf.png")
-        : root.kind == "code" ? @image-url("../assets/file-icons/code.svg")
-        : root.kind == "document" ? @image-url("../assets/file-icons/document.png")
-        : root.kind == "table" ? @image-url("../assets/file-icons/table.png")
-        : root.kind == "config" ? @image-url("../assets/file-icons/config.svg")
-        : root.kind == "text" ? @image-url("../assets/file-icons/text.png")
-        : root.kind == "terminal" ? @image-url("../assets/file-icons/terminal.svg")
-        : root.kind == "exe" ? @image-url("../assets/file-icons/exe.png")
-        : @image-url("../assets/file-icons/file.svg");
+    source: root.kind == "folder" ? @image-url("../assets/file-icons/shell/folder.png")
+        : root.kind == "link" ? @image-url("../assets/file-icons/shell/link.png")
+        : root.kind == "image" ? @image-url("../assets/file-icons/shell/image.png")
+        : root.kind == "video" ? @image-url("../assets/file-icons/shell/video.png")
+        : root.kind == "audio" ? @image-url("../assets/file-icons/shell/audio.png")
+        : root.kind == "archive" ? @image-url("../assets/file-icons/shell/archive.png")
+        : root.kind == "pdf" ? @image-url("../assets/file-icons/shell/pdf.png")
+        : root.kind == "code" ? @image-url("../assets/file-icons/shell/code.png")
+        : root.kind == "document" ? @image-url("../assets/file-icons/shell/document.png")
+        : root.kind == "table" ? @image-url("../assets/file-icons/shell/table.png")
+        : root.kind == "presentation" ? @image-url("../assets/file-icons/shell/presentation.png")
+        : root.kind == "csv" ? @image-url("../assets/file-icons/shell/csv.png")
+        : root.kind == "html" ? @image-url("../assets/file-icons/shell/html.png")
+        : root.kind == "xml" ? @image-url("../assets/file-icons/shell/xml.png")
+        : root.kind == "config" ? @image-url("../assets/file-icons/shell/config.png")
+        : root.kind == "text" ? @image-url("../assets/file-icons/shell/text.png")
+        : root.kind == "terminal" ? @image-url("../assets/file-icons/shell/terminal.png")
+        : root.kind == "exe" ? @image-url("../assets/file-icons/shell/exe.png")
+        : root.kind == "rtf" ? @image-url("../assets/file-icons/shell/rtf.png")
+        : root.kind == "font" ? @image-url("../assets/file-icons/shell/font.png")
+        : root.kind == "email" ? @image-url("../assets/file-icons/shell/email.png")
+        : root.kind == "dll" ? @image-url("../assets/file-icons/shell/dll.png")
+        : root.kind == "md" ? @image-url("../assets/file-icons/shell/md.png")
+        : root.kind == "toml" ? @image-url("../assets/file-icons/shell/toml.png")
+        : root.kind == "rs" ? @image-url("../assets/file-icons/shell/rs.png")
+        : root.kind == "go" ? @image-url("../assets/file-icons/shell/go.png")
+        : root.kind == "vue" ? @image-url("../assets/file-icons/shell/vue.png")
+        : root.kind == "svelte" ? @image-url("../assets/file-icons/shell/svelte.png")
+        : root.kind == "wasm" ? @image-url("../assets/file-icons/shell/wasm.png")
+        : root.kind == "env" ? @image-url("../assets/file-icons/shell/env.png")
+        : root.kind == "gitignore" ? @image-url("../assets/file-icons/shell/gitignore.png")
+        : root.kind == "vector" ? @image-url("../assets/file-icons/fluent/vector.svg")
+        : root.kind == "vsdx" ? @image-url("../assets/file-icons/fluent/vsdx.svg")
+        : root.kind == "one" ? @image-url("../assets/file-icons/fluent/one.svg")
+        : root.kind == "powerbi" ? @image-url("../assets/file-icons/fluent/powerbi.svg")
+        : root.kind == "ipynb" ? @image-url("../assets/file-icons/fluent/ipynb.svg")
+        : root.kind == "accdb" ? @image-url("../assets/file-icons/fluent/accdb.svg")
+        : root.kind == "mpp" ? @image-url("../assets/file-icons/fluent/mpp.svg")
+        : root.kind == "pub" ? @image-url("../assets/file-icons/fluent/pub.svg")
+        : root.kind == "model" ? @image-url("../assets/file-icons/fluent/model.svg")
+        : root.kind == "calendar" ? @image-url("../assets/file-icons/fluent/calendar.svg")
+        : @image-url("../assets/file-icons/shell/file.png");
 }
 
 export struct SftpTreeNode {
@@ -1059,7 +1086,10 @@ export component SftpPanel inherits Rectangle {
                                     mouse-cursor: pointer;
                                     clicked => { root.selected-row = i; }
                                     double-clicked => {
-                                        if (entry.is-dir) {
+                                        // Symlinks are not directories in the listing
+                                        // (mode is lrwx…); still open by navigating
+                                        // so the panel follows the target path.
+                                        if (entry.is-dir || entry.is-link) {
                                             root.navigate(entry.full-path);
                                         } else {
                                             root.download-and-open(entry.full-path);

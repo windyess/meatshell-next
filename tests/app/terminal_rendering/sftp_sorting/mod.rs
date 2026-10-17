@@ -5,6 +5,7 @@ fn sftp_entry(name: &str, is_dir: bool) -> SftpEntry {
         name: name.into(),
         full_path: format!("/{name}").into(),
         is_dir,
+        is_link: false,
         size: String::new().into(),
         size_bytes: 0.0,
         modified: String::new().into(),

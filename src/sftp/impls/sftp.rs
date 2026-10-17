@@ -644,33 +644,57 @@ async fn run_sftp(
                     t("加载", "Loading"),
                     path
                 )));
-                match list_dir_impl(&sftp, &path).await {
-                    Ok(entries) => {
-                        publish_dir_entries(&handle, &owner_cache, &names_ready_rx, &events, path.clone(), entries)
+                match resolve_nav_path(&sftp, &path).await {
+                    Ok(nav) => match list_dir_impl(&sftp, &nav).await {
+                        Ok(entries) => {
+                            publish_dir_entries(
+                                &handle,
+                                &owner_cache,
+                                &names_ready_rx,
+                                &events,
+                                nav.clone(),
+                                entries,
+                            )
                             .await;
-                        let _ = events.send(SessionEvent::SftpStatus(path));
-                    }
+                            let _ = events.send(SessionEvent::SftpStatus(nav));
+                        }
+                        Err(e) => {
+                            let _ = events.send(SessionEvent::SftpError(list_error_msg(&nav, &e)));
+                        }
+                    },
                     Err(e) => {
-                        let _ = events.send(SessionEvent::SftpError(list_error_msg(&path, &e)));
+                        let _ = events.send(SessionEvent::SftpError(e.to_string()));
                     }
                 }
             }
 
             SftpCommand::RefreshDir(path) => {
-                // File panel — same as ListDir.
+                // File panel — same as ListDir (follow symlink dirs).
                 let _ = events.send(SessionEvent::SftpStatus(format!(
                     "{} {}...",
                     t("加载", "Loading"),
                     path
                 )));
-                match list_dir_impl(&sftp, &path).await {
-                    Ok(entries) => {
-                        publish_dir_entries(&handle, &owner_cache, &names_ready_rx, &events, path.clone(), entries)
+                match resolve_nav_path(&sftp, &path).await {
+                    Ok(nav) => match list_dir_impl(&sftp, &nav).await {
+                        Ok(entries) => {
+                            publish_dir_entries(
+                                &handle,
+                                &owner_cache,
+                                &names_ready_rx,
+                                &events,
+                                nav.clone(),
+                                entries,
+                            )
                             .await;
-                        let _ = events.send(SessionEvent::SftpStatus(path.clone()));
-                    }
+                            let _ = events.send(SessionEvent::SftpStatus(nav.clone()));
+                        }
+                        Err(e) => {
+                            let _ = events.send(SessionEvent::SftpError(list_error_msg(&nav, &e)));
+                        }
+                    },
                     Err(e) => {
-                        let _ = events.send(SessionEvent::SftpError(list_error_msg(&path, &e)));
+                        let _ = events.send(SessionEvent::SftpError(e.to_string()));
                     }
                 }
                 // Tree — re-fetch every currently-expanded directory so deleted /
@@ -1989,6 +2013,41 @@ fn list_error_msg(path: &str, e: &impl std::fmt::Display) -> String {
     } else {
         format!("{} {}: {}", t("无法访问", "Cannot open"), path, raw)
     }
+}
+
+/// Resolve a navigation path: if `path` is a symlink, follow it with
+/// `canonicalize` so the panel lands on the real directory. Symlinks that
+/// resolve to a regular file are rejected — the UI should download those via
+/// the normal file action, not `ListDir`.
+async fn resolve_nav_path(sftp: &SftpSession, path: &str) -> Result<String> {
+    let link_meta = sftp.symlink_metadata(path).await.ok();
+    let is_link = link_meta
+        .as_ref()
+        .and_then(|m| m.permissions)
+        .map(|p| (p & 0o170_000) == 0o120_000)
+        .unwrap_or(false);
+    if !is_link {
+        return Ok(path.to_string());
+    }
+    let resolved = sftp
+        .canonicalize(path)
+        .await
+        .with_context(|| format!("resolve symlink {path}"))?;
+    let meta = sftp
+        .metadata(&resolved)
+        .await
+        .with_context(|| format!("stat symlink target {resolved}"))?;
+    let is_dir = (meta.permissions.unwrap_or(0) & 0o170_000) == 0o040_000;
+    if !is_dir {
+        anyhow::bail!(
+            "{}",
+            t(
+                "符号链接指向文件，请使用下载或打开",
+                "Symlink points to a file; use Download or Open"
+            )
+        );
+    }
+    Ok(resolved)
 }
 
 async fn list_dir_impl(sftp: &SftpSession, path: &str) -> Result<Vec<RemoteEntry>> {

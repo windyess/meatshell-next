@@ -234,6 +234,7 @@ pub(super) fn apply_session_event_to_window(
                         name: e.name.clone().into(),
                         full_path: e.full_path.clone().into(),
                         is_dir: e.is_dir,
+                        is_link: e.file_type == "symlink",
                         size: if e.is_dir {
                             "".into()
                         } else {

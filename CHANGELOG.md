@@ -5,6 +5,9 @@ All notable changes are documented here. 本文件记录所有重要变更。
 
 ## Unreleased
 
+- **SFTP 文件图标以 Windows 资源管理器风格优先。** `shell/` Explorer 关联 PNG 为主，`fluent/` Fluent File Type 补 Visio/OneNote/矢量等缺口。
+- **SFTP file icons prefer Windows Explorer style.** `shell/` association PNGs first; Fluent File Type fills Visio/OneNote/vector gaps.
+
 ## [0.7.11] - 2026-10-14
 
 - **SFTP 跟随 cd 不再被其他命令触发。** 仅在终端执行 `cd` 时切目录（含直接在终端敲入的 `cd`）；`ls` 等命令以及手动浏览后的下一条非 cd 命令都不会把面板拽走。

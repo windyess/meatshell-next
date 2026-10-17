@@ -1,10 +1,16 @@
-SFTP name-column icons use a hybrid set:
+SFTP name-column icons use two bundled layers
+(Windows Explorer style preferred):
 
-1. `*.png` — 32×32 association icons extracted from the local Windows Shell
-   (`SHGetFileInfo`) via `extract_win_icons.py`, so familiar desktop types
-   match Explorer without calling the shell at runtime.
+1. shell/  — Windows Explorer association PNGs (PRIMARY)
+             Extracted on Windows via extract_win_icons.py
+             (SHGetFileInfo); not queried at runtime.
+             Covers folders, Office, media, archives, common
+             desktop types, and selected dev associations.
 
-2. `*.svg` — Fluent System Icons (MIT), used where Windows has no stable
-   association (symlink, shell script, source/config, generic file):
-   Copyright (c) Microsoft Corporation
-   https://github.com/microsoft/fluentui-system-icons/blob/main/LICENSE
+2. fluent/ — Microsoft Fluent File Type Icons (item-types SVG)
+             Fills gaps where Shell has no distinct icon
+             (Visio, OneNote, Power BI, vector, models, …).
+             Source: @fluentui/react-file-type-icons
+             https://github.com/microsoft/fluentui
+             MIT — Copyright (c) Microsoft Corporation
+             Assets also: https://aka.ms/fluentui-assets-license

@@ -1,8 +1,7 @@
 use super::*;
 
-/// Bundled file-type icon key (see `assets/file-icons/`).
-/// Windows shell PNGs cover common desktop types; Fluent SVGs cover gaps
-/// such as symlink / shell script / source / config.
+/// Bundled icon key → `assets/file-icons/{shell|fluent|system}/`.
+/// Priority: Windows Explorer (shell) → Fluent File Type → System.
 pub(super) fn sftp_entry_icon_kind(
     name: &str,
     is_dir: bool,
@@ -21,23 +20,54 @@ pub(super) fn sftp_entry_icon_kind(
         .map(|(_, e)| e.to_ascii_lowercase())
         .unwrap_or_default();
     let kind = match ext.as_str() {
-        "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" | "ico" | "svg" | "heic" | "avif" => {
-            "image"
+        // shell/ — Windows Explorer associations (preferred look)
+        "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" | "ico" | "heic" | "avif" | "tif"
+        | "tiff" | "psd" => "image",
+        "mp4" | "mkv" | "avi" | "mov" | "webm" | "m4v" | "flv" | "wmv" | "mpeg" | "mpg" => {
+            "video"
         }
-        "mp4" | "mkv" | "avi" | "mov" | "webm" | "m4v" | "flv" | "wmv" => "video",
         "mp3" | "wav" | "flac" | "ogg" | "m4a" | "aac" | "wma" | "opus" => "audio",
-        "zip" | "tar" | "gz" | "tgz" | "bz2" | "xz" | "7z" | "rar" | "zst" => "archive",
+        "zip" | "tar" | "gz" | "tgz" | "bz2" | "xz" | "7z" | "rar" | "zst" | "iso" | "dmg" => {
+            "archive"
+        }
         "pdf" => "pdf",
-        "xls" | "xlsx" | "xlsm" | "ods" | "csv" => "table",
-        "doc" | "docx" | "odt" | "rtf" | "ppt" | "pptx" | "odp" => "document",
-        "rs" | "py" | "js" | "jsx" | "ts" | "tsx" | "go" | "c" | "h" | "cpp" | "hpp" | "cc"
-        | "java" | "kt" | "swift" | "rb" | "php" | "lua" | "pl" | "r" | "scala" | "cs"
-        | "vue" | "svelte" | "dart" | "zig" | "nim" | "html" | "htm" | "css" | "scss"
-        | "less" | "sass" => "code",
+        "xls" | "xlsx" | "xlsm" | "xlsb" | "ods" => "table",
+        "csv" => "csv",
+        "doc" | "docx" | "docm" | "odt" => "document",
+        "rtf" | "pages" | "epub" => "rtf",
+        "ppt" | "pptx" | "pptm" | "odp" | "key" => "presentation",
+        "html" | "htm" | "mht" | "mhtml" => "html",
+        "xml" | "xsl" | "xaml" => "xml",
+        "json" | "yml" | "yaml" | "ini" | "conf" | "cfg" | "plist" => "config",
+        "txt" | "log" | "rst" | "org" => "text",
+        "py" | "js" | "jsx" | "ts" | "tsx" | "c" | "h" | "cpp" | "hpp" | "java" | "kt"
+        | "swift" | "rb" | "php" | "lua" | "cs" | "css" | "scss" | "sql" => "code",
         "sh" | "bash" | "zsh" | "fish" | "ps1" | "bat" | "cmd" => "terminal",
-        "json" | "yml" | "yaml" | "toml" | "ini" | "conf" | "cfg" | "xml" | "plist" => "config",
-        "txt" | "md" | "markdown" | "log" | "rst" | "org" => "text",
-        "exe" | "msi" | "dmg" | "app" | "appimage" | "deb" | "rpm" => "exe",
+        "exe" | "msi" | "apk" | "app" | "appimage" | "deb" | "rpm" => "exe",
+        "dll" | "so" | "dylib" | "jar" | "pdb" => "dll",
+        "ttf" | "otf" | "woff" | "woff2" => "font",
+        "eml" | "msg" | "pst" | "ost" => "email",
+        "md" | "markdown" | "mdown" | "mkdn" => "md",
+        "toml" => "toml",
+        "rs" => "rs",
+        "go" => "go",
+        "vue" => "vue",
+        "svelte" => "svelte",
+        "wasm" => "wasm",
+        "env" => "env",
+        "gitignore" => "gitignore",
+
+        // fluent/ — types Shell has no distinct association for
+        "svg" | "svgz" | "eps" | "ai" | "sketch" => "vector",
+        "vsd" | "vsdx" | "vsdm" => "vsdx",
+        "one" | "onetoc" | "onetoc2" | "onepkg" => "one",
+        "pbix" | "pbids" => "powerbi",
+        "ipynb" => "ipynb",
+        "accdb" | "mdb" => "accdb",
+        "mpp" => "mpp",
+        "pub" => "pub",
+        "obj" | "fbx" | "gltf" | "glb" | "stl" | "blend" | "dwg" | "dxf" => "model",
+        "ics" | "ical" | "vcs" => "calendar",
         _ if mode & 0o111 != 0 => "terminal",
         _ => "file",
     };
