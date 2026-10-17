@@ -5,8 +5,13 @@ All notable changes are documented here. 本文件记录所有重要变更。
 
 ## Unreleased
 
+## [0.7.13] - 2026-10-17
+
 - **SFTP 文件图标以 Windows 资源管理器风格优先。** `shell/` Explorer 关联 PNG 为主，`fluent/` Fluent File Type 补 Visio/OneNote/矢量等缺口。
 - **SFTP file icons prefer Windows Explorer style.** `shell/` association PNGs first; Fluent File Type fills Visio/OneNote/vector gaps.
+
+- **SFTP 长文件名可读性。** 列表窄时自动收起低优先级列，保证名称列宽度；悬停显示完整文件名。
+- **SFTP long filenames stay readable.** Low-priority columns auto-hide when the list is narrow so the name column keeps room; hover shows the full name.
 
 ## [0.7.11] - 2026-10-14
 
