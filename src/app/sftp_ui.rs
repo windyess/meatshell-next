@@ -1,6 +1,8 @@
 use super::*;
 
-/// Bundled Windows Explorer file-type icon key (see `assets/file-icons/*.png`).
+/// Bundled file-type icon key (see `assets/file-icons/`).
+/// Windows shell PNGs cover common desktop types; Fluent SVGs cover gaps
+/// such as symlink / shell script / source / config.
 pub(super) fn sftp_entry_icon_kind(
     name: &str,
     is_dir: bool,

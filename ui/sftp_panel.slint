@@ -25,26 +25,28 @@ export struct SftpEntry {
     icon-kind: string,
 }
 
-// Name-column icon: Windows shell icons extracted into assets/file-icons/*.png
+// Name-column icons: Windows shell PNGs for familiar desktop types; Fluent
+// SVGs (MIT) fill Linux-oriented gaps Windows associations don't cover well
+// (symlink, shell script, source/config, generic file).
 component SftpFileIcon inherits Image {
     in property <string> kind;
     width: 16px;
     height: 16px;
     source: root.kind == "folder" ? @image-url("../assets/file-icons/folder.png")
-        : root.kind == "link" ? @image-url("../assets/file-icons/link.png")
+        : root.kind == "link" ? @image-url("../assets/file-icons/link.svg")
         : root.kind == "image" ? @image-url("../assets/file-icons/image.png")
         : root.kind == "video" ? @image-url("../assets/file-icons/video.png")
         : root.kind == "audio" ? @image-url("../assets/file-icons/audio.png")
         : root.kind == "archive" ? @image-url("../assets/file-icons/archive.png")
         : root.kind == "pdf" ? @image-url("../assets/file-icons/pdf.png")
-        : root.kind == "code" ? @image-url("../assets/file-icons/code.png")
+        : root.kind == "code" ? @image-url("../assets/file-icons/code.svg")
         : root.kind == "document" ? @image-url("../assets/file-icons/document.png")
         : root.kind == "table" ? @image-url("../assets/file-icons/table.png")
-        : root.kind == "config" ? @image-url("../assets/file-icons/config.png")
+        : root.kind == "config" ? @image-url("../assets/file-icons/config.svg")
         : root.kind == "text" ? @image-url("../assets/file-icons/text.png")
-        : root.kind == "terminal" ? @image-url("../assets/file-icons/terminal.png")
+        : root.kind == "terminal" ? @image-url("../assets/file-icons/terminal.svg")
         : root.kind == "exe" ? @image-url("../assets/file-icons/exe.png")
-        : @image-url("../assets/file-icons/file.png");
+        : @image-url("../assets/file-icons/file.svg");
 }
 
 export struct SftpTreeNode {
