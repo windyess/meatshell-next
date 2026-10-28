@@ -5,6 +5,17 @@ All notable changes are documented here. 本文件记录所有重要变更。
 
 ## Unreleased
 
+## [0.7.14] - 2026-10-28
+
+- **默认关闭启动时检查新版本。** 不再默认向 GitHub 查询 releases；已有安装会在下次启动经配置迁移关闭，设置里仍可手动打开。
+- **Disable startup update check by default.** The app no longer queries GitHub releases on launch by default; existing installs are migrated off on next start, and Settings can still re-enable it.
+
+- **SFTP 右键「移动文件/文件夹」；复制/移动粘贴前二次确认。** 「复制路径」改为移动；粘贴共用，确认弹窗展示来源与目标；粘贴后停留在当前目录。
+- **SFTP context menu Move; confirm before copy/move paste.** Replaces Copy path with Move; Paste is shared and shows source/destination first; the panel stays in the current directory after paste.
+
+- **修复终端反色白底白字不可见（如 nano）。** 反色对比度过低时强制为可读的深色字/浅色底。
+- **Fix reverse-video white-on-white text (e.g. nano).** Low-contrast inverse spans are forced to a readable dark-on-light pair.
+
 ## [0.7.13] - 2026-10-17
 
 - **SFTP 文件图标以 Windows 资源管理器风格优先。** `shell/` Explorer 关联 PNG 为主，`fluent/` Fluent File Type 补 Visio/OneNote/矢量等缺口。
