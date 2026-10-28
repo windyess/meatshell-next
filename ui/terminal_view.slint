@@ -414,6 +414,7 @@ export component TerminalView inherits Rectangle {
     callback sftp-chmod-request(string, string, int);
     callback sftp-copy-path(string);
     callback sftp-copy-files(string /* menu-target */);
+    callback sftp-move-files(string /* menu-target */);
     callback sftp-paste-files();
     callback sftp-zip-files(string /* menu-target */);
     callback sftp-cd-terminal(string /* path */);
@@ -2343,6 +2344,7 @@ export component TerminalView inherits Rectangle {
             chmod-request(path, name, mode) => { root.sftp-chmod-request(path, name, mode); }
             copy-path(path)     => { root.sftp-copy-path(path); }
             copy-files(path)    => { root.sftp-copy-files(path); }
+            move-files(path)    => { root.sftp-move-files(path); }
             paste-files()       => { root.sftp-paste-files(); }
             zip-files(path)     => { root.sftp-zip-files(path); }
             cd-terminal(path)   => { root.sftp-cd-terminal(path); }

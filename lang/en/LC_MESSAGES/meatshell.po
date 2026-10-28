@@ -234,6 +234,18 @@ msgstr "Permissions"
 msgid "Copy path"
 msgstr "Copy path"
 
+msgid "Move file/folder"
+msgstr "Move file/folder"
+
+msgid "Confirm move"
+msgstr "Confirm move"
+
+msgid "Confirm copy"
+msgstr "Confirm copy"
+
+msgid "Move"
+msgstr "Move"
+
 msgid "CD in terminal"
 msgstr "CD in terminal"
 

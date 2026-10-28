@@ -694,7 +694,7 @@ export component AppWindow inherits Window {
     // Render the welcome/session list as a left sidebar instead of a tab (v0.5).
     in-out property <bool> welcome-as-sidebar: false;
     callback set-welcome-as-sidebar(bool);         // apply + persist
-    in-out property <bool> update-check-enabled: true;   // startup new-version check (#184)
+    in-out property <bool> update-check-enabled: false;  // startup new-version check (#184), off by default
     callback set-update-check-enabled(bool);       // apply + persist
     in-out property <bool> mcp-enabled: true;
     in-out property <bool> mcp-use-saved-credentials: true;
@@ -986,6 +986,12 @@ export component AppWindow inherits Window {
     in-out property <string> confirm-delete-tab;
     in-out property <string> confirm-delete-path;
 
+    // Copy/move paste confirmation: show source paths + destination before cp/mv.
+    in-out property <bool> confirm-move-open: false;
+    in-out property <bool> confirm-paste-is-move: false;
+    in-out property <string> confirm-move-tab;
+    in-out property <string> confirm-move-detail;
+
     // One priority policy per AppWindow. Rendering and keyboard ownership both
     // use this value; lower layers retain drafts while covered.
     out property <ModalKind> active-modal:
@@ -994,6 +1000,7 @@ export component AppWindow inherits Window {
         root.cred-prompt-open ? ModalKind.credentials :
         root.hostkey-prompt-open ? ModalKind.host-key :
         root.confirm-delete-open ? ModalKind.delete-confirm :
+        root.confirm-move-open ? ModalKind.move-confirm :
         root.paste-confirm-open ? ModalKind.paste-confirm :
         root.qcg-open ? ModalKind.command-group :
         root.sftp-prompt-open ? ModalKind.sftp-prompt :
@@ -1185,7 +1192,10 @@ export component AppWindow inherits Window {
     callback sftp-copy-path(string);             // put the path on the clipboard
     in-out property <int> sftp-clipboard-count: 0;
     callback sftp-copy-files(string /* tab-id */, string /* menu-target */);
+    callback sftp-move-files(string /* tab-id */, string /* menu-target */);
     callback sftp-paste-files(string /* tab-id */);
+    callback sftp-move-confirmed(string /* tab-id */);
+    callback sftp-move-cancelled();
     callback sftp-zip-files(string /* tab-id */, string /* menu-target */);
     callback sftp-cd-terminal(string /* tab-id */, string /* path */);
 
@@ -2159,6 +2169,7 @@ export component AppWindow inherits Window {
                         }
                         sftp-copy-path(path) => { root.sftp-copy-path(path); }
                         sftp-copy-files(path) => { root.sftp-copy-files(term.id, path); }
+                        sftp-move-files(path) => { root.sftp-move-files(term.id, path); }
                         sftp-paste-files() => { root.sftp-paste-files(term.id); }
                         sftp-zip-files(path) => { root.sftp-zip-files(term.id, path); }
                         sftp-cd-terminal(path) => { root.sftp-cd-terminal(term.id, path); }
@@ -4392,7 +4403,8 @@ export component AppWindow inherits Window {
         Rectangle {
             x: (parent.width - self.width) / 2;
             y: (parent.height - self.height) / 2;
-            width: 340px;
+            // Rename needs a wider field for long names.
+            width: root.sftp-prompt-kind == "rename" ? 550px : 340px;
             height: 178px;
             background: Theme.popup-bg;
             border-radius: Theme.radius-md;
@@ -4931,6 +4943,32 @@ export component AppWindow inherits Window {
             root.confirm-delete-open = false;
         }
         cancel => { root.confirm-delete-batch = false; root.confirm-delete-open = false; }
+    }
+
+    // Copy/move paste confirmation — review source paths and destination first.
+    ConfirmDialog {
+        width: parent.width;
+        height: parent.height;
+        is-open <=> root.confirm-move-open;
+        is-mac: root.is-mac;
+        covered: root.active-modal != ModalKind.move-confirm;
+        confirm-on-enter: true;
+        title: root.confirm-paste-is-move ? @tr("Confirm move") : @tr("Confirm copy");
+        message: root.confirm-paste-is-move
+            ? (root.lang-en ? "Move the staged items to the current directory?"
+                            : "将已暂存的项目移动到当前目录？")
+            : (root.lang-en ? "Copy the staged items to the current directory?"
+                            : "将已暂存的项目复制到当前目录？");
+        detail: root.confirm-move-detail;
+        confirm-label: root.confirm-paste-is-move ? @tr("Move") : @tr("Paste");
+        confirm => {
+            root.sftp-move-confirmed(root.confirm-move-tab);
+            root.confirm-move-open = false;
+        }
+        cancel => {
+            root.confirm-move-open = false;
+            root.sftp-move-cancelled();
+        }
     }
 
     // Multi-line paste can execute several shell commands at once. Keep the

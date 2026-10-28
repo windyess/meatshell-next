@@ -722,21 +722,64 @@ pub(crate) fn vt_span_colors(
         );
     }
 
+    // Reverse video swaps fg/bg. Always use opaque colours (Default bg is
+    // normally transparent for wallpaper) and the *foreground* palette for
+    // both sides — `vt_bg_to_slint` remaps light-mode whites to pastel fills
+    // that can land next to a light default fg and wash out nano/mc chrome.
     let fg_color = match bg {
         vt100::Color::Default => {
             let (r, g, b) = vt_default_bg_rgb(is_dark);
             slint::Color::from_rgb_u8(r, g, b)
         }
-        _ => vt_color_to_slint(bg, false, is_dark),
+        other => vt_color_to_slint(other, false, is_dark),
     };
     let bg_color = match fg {
         vt100::Color::Default => {
             let (r, g, b) = vt_default_fg_rgb(is_dark);
             slint::Color::from_rgb_u8(r, g, b)
         }
-        _ => vt_bg_to_slint(fg, is_dark),
+        other => vt_color_to_slint(other, bold, is_dark),
     };
-    (fg_color, bg_color)
+    ensure_inverse_contrast(fg_color, bg_color)
+}
+
+/// Relative luminance (sRGB, approx) in 0..=1.
+fn color_luminance(c: slint::Color) -> f32 {
+    let lin = |u: u8| {
+        let s = u as f32 / 255.0;
+        if s <= 0.04045 {
+            s / 12.92
+        } else {
+            ((s + 0.055) / 1.055).powf(2.4)
+        }
+    };
+    0.2126 * lin(c.red()) + 0.7152 * lin(c.green()) + 0.0722 * lin(c.blue())
+}
+
+/// WCAG relative-contrast ratio between two luminances (1..=21).
+fn contrast_ratio(a: f32, b: f32) -> f32 {
+    let (hi, lo) = if a > b { (a, b) } else { (b, a) };
+    (hi + 0.05) / (lo + 0.05)
+}
+
+/// When reverse video lands on low-contrast fg/bg — common with white default
+/// text + white ANSI fills over wallpaper (nano title/key chrome) — force a
+/// readable dark-on-light (or light-on-dark) pair.
+fn ensure_inverse_contrast(fg: slint::Color, bg: slint::Color) -> (slint::Color, slint::Color) {
+    let fl = color_luminance(fg);
+    let bl = color_luminance(bg);
+    // ~3:1 is the WCAG large-text floor; white-on-#d4d4d4 is only ~1.5:1.
+    if contrast_ratio(fl, bl) >= 3.0 {
+        return (fg, bg);
+    }
+    let dark = slint::Color::from_rgb_u8(0x12, 0x12, 0x14);
+    let light = slint::Color::from_rgb_u8(0xf2, 0xf2, 0xf4);
+    // Prefer classic reverse (dark ink on light paper) when either side is light.
+    if fl.max(bl) >= 0.45 {
+        (dark, light)
+    } else {
+        (light, dark)
+    }
 }
 
 /// In light mode, remap light true-colour foregrounds to dark so they are

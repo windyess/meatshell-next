@@ -340,6 +340,41 @@ pub(super) fn collect_copy_sources(
     }
 }
 
+/// Build a POSIX `mv` command. Same-directory sources are skipped (already
+/// at the destination); if nothing remains to move, returns `None`.
+pub(super) fn build_remote_move_command(sources: &[String], dest_dir: &str) -> Option<String> {
+    if sources.is_empty() {
+        return None;
+    }
+    let dest = dest_dir.trim_end_matches('/');
+    let dest = if dest.is_empty() { "/" } else { dest };
+    let mut elsewhere = Vec::new();
+    for src in sources {
+        if src.is_empty() {
+            continue;
+        }
+        if parent_path(src) != dest {
+            elsewhere.push(src.as_str());
+        }
+    }
+    if elsewhere.is_empty() {
+        return None;
+    }
+    let mut cmd = String::from("mv --");
+    for src in &elsewhere {
+        cmd.push(' ');
+        cmd.push_str(&posix_shell_quote(src));
+    }
+    let dest_arg = if dest == "/" {
+        "/".to_string()
+    } else {
+        format!("{dest}/")
+    };
+    cmd.push(' ');
+    cmd.push_str(&posix_shell_quote(&dest_arg));
+    Some(cmd)
+}
+
 /// Build a POSIX `cp -a` command. Same-directory paste uses `name.copy`
 /// so GNU cp does not fail with “are the same file”.
 pub(super) fn build_remote_copy_command(sources: &[String], dest_dir: &str) -> Option<String> {
@@ -474,6 +509,32 @@ mod tests {
             cmd,
             "cp -a -- '/data/tools/sysctl.conf' '/data/tools/fw-all.sh' '/tmp/'"
         );
+    }
+
+    #[test]
+    fn moves_into_another_directory() {
+        let cmd = build_remote_move_command(
+            &["/data/tools/sysctl.conf".into(), "/data/tools/fw-all.sh".into()],
+            "/tmp",
+        )
+        .unwrap();
+        assert_eq!(
+            cmd,
+            "mv -- '/data/tools/sysctl.conf' '/data/tools/fw-all.sh' '/tmp/'"
+        );
+    }
+
+    #[test]
+    fn move_skips_same_directory_sources() {
+        assert!(
+            build_remote_move_command(&["/data/tools/a".into()], "/data/tools").is_none()
+        );
+        let cmd = build_remote_move_command(
+            &["/opt/a".into(), "/data/tools/b".into()],
+            "/data/tools",
+        )
+        .unwrap();
+        assert_eq!(cmd, "mv -- '/opt/a' '/data/tools/'");
     }
 
     #[test]

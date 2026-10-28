@@ -234,6 +234,18 @@ msgstr "权限"
 msgid "Copy path"
 msgstr "复制路径"
 
+msgid "Move file/folder"
+msgstr "移动文件/文件夹"
+
+msgid "Confirm move"
+msgstr "确认移动"
+
+msgid "Confirm copy"
+msgstr "确认复制"
+
+msgid "Move"
+msgstr "移动"
+
 msgid "CD in terminal"
 msgstr "终端进入此目录"
 

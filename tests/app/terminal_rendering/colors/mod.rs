@@ -25,6 +25,27 @@ fn inverse_default_colours_paint_a_visible_background() {
 }
 
 #[test]
+fn inverse_white_on_white_is_forced_readable() {
+    // Bright-white fg + bright-white bg + reverse used to paint white-on-white
+    // (nano title/key chrome over a dark wallpaper). Contrast must be rescued.
+    let dark = 0xff121214u32;
+    let light = 0xfff2f2f4u32;
+    for (name, fg_in, bg_in) in [
+        ("idx15/idx15", vt100::Color::Idx(15), vt100::Color::Idx(15)),
+        // nano status bar: default (light) ink on bright-white fill + reverse
+        ("default/idx15", vt100::Color::Default, vt100::Color::Idx(15)),
+        ("idx7/idx7", vt100::Color::Idx(7), vt100::Color::Idx(7)),
+    ] {
+        let (fg, bg) = vt_span_colors(fg_in, bg_in, false, true, true);
+        assert_eq!(
+            (fg.as_argb_encoded(), bg.as_argb_encoded()),
+            (dark, light),
+            "{name}: expected dark-on-light rescue"
+        );
+    }
+}
+
+#[test]
 fn underlined_blanks_are_kept_as_visible_spans() {
     // #444: `printf '\033[4m \033[0m'` must still draw an underline, and
     // input fields drawn as underlined spaces must survive row building.

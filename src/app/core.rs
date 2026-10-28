@@ -172,8 +172,13 @@ pub struct AppCore {
     /// `registry.count() == 1` would re-fire after close-then-open.
     /// UI-thread-only, like the rest of this struct.
     pub first_window_done: Cell<bool>,
-    /// Remote paths staged by SFTP “Copy”, pasted later as `cp -a` on the PTY.
+    /// Remote paths staged by SFTP “Copy” / “Move”, pasted later as `cp -a`
+    /// or `mv` on the PTY. `sftp_clipboard_is_move` selects which command.
     pub sftp_clipboard: Rc<RefCell<Vec<String>>>,
+    pub sftp_clipboard_is_move: Cell<bool>,
+    /// Destination directory captured when the move-confirm dialog opens, so
+    /// confirm uses the path the user reviewed even if they navigate away.
+    pub sftp_pending_move_dest: RefCell<Option<String>>,
 }
 
 #[cfg(test)]

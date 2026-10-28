@@ -9,7 +9,7 @@
 //! via the shared `UnboundedSender<SessionEvent>` that already exists for the
 //! terminal tab.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -550,6 +550,7 @@ async fn run_sftp(
         t("SFTP 加载", "SFTP loading"),
         home
     )));
+    let dir_cache: Arc<Mutex<DirListCache>> = Arc::new(Mutex::new(DirListCache::new()));
     match list_dir_impl(&sftp, &home).await {
         Ok(entries) => {
             // Prefer painting names with the listing: wait briefly for the
@@ -557,6 +558,7 @@ async fn run_sftp(
             wait_owner_prefetch(&names_ready_rx, Duration::from_secs(3)).await;
             let mut entries = entries;
             let need = owner_cache.lock().unwrap().apply(&mut entries);
+            dir_cache.lock().unwrap().insert(&home, entries.clone());
             let _ = events.send(SessionEvent::SftpEntries {
                 path: home.clone(),
                 entries: entries.clone(),
@@ -619,12 +621,18 @@ async fn run_sftp(
     // Own every transfer task. Dropping/aborting the worker cancels transfers
     // too, rather than leaving detached writes alive after an MCP cancellation.
     let mut transfers = tokio::task::JoinSet::new();
+    // Commands pulled while coalescing consecutive ListDir navigations.
+    let mut pending: VecDeque<SftpCommand> = VecDeque::new();
 
     // --- Command loop -------------------------------------------------------
     loop {
-        let cmd = tokio::select! {
-            command = commands.recv() => match command { Some(command) => command, None => break },
-            _ = transfers.join_next(), if !transfers.is_empty() => continue,
+        let cmd = if let Some(command) = pending.pop_front() {
+            command
+        } else {
+            tokio::select! {
+                command = commands.recv() => match command { Some(command) => command, None => break },
+                _ = transfers.join_next(), if !transfers.is_empty() => continue,
+            }
         };
         match cmd {
             SftpCommand::Close => break,
@@ -634,67 +642,93 @@ async fn run_sftp(
                 // Repaint when any name is available — the deferred home listing
                 // already painted with numbers/placeholders.
                 if entries.iter().any(|entry| entry.owner.is_some() || entry.group.is_some()) {
+                    dir_cache.lock().unwrap().insert(&path, entries.clone());
                     let _ = events.send(SessionEvent::SftpEntries { path, entries });
                 }
             }
 
             SftpCommand::ListDir(path) => {
+                // Collapse consecutive navigations so a slow first open does not
+                // paint after the user already moved on.
+                let mut path = path;
+                loop {
+                    match commands.try_recv() {
+                        Ok(SftpCommand::ListDir(p)) => path = p,
+                        Ok(other) => {
+                            pending.push_back(other);
+                            break;
+                        }
+                        Err(_) => break,
+                    }
+                }
+                while matches!(pending.front(), Some(SftpCommand::ListDir(_))) {
+                    if let Some(SftpCommand::ListDir(p)) = pending.pop_front() {
+                        path = p;
+                    }
+                }
+                let cached = { dir_cache.lock().unwrap().get(&path) };
+                if let Some(entries) = cached {
+                    publish_dir_entries(
+                        &handle,
+                        &owner_cache,
+                        &names_ready_rx,
+                        &events,
+                        path.clone(),
+                        entries,
+                    )
+                    .await;
+                    let _ = events.send(SessionEvent::SftpStatus(path));
+                    continue;
+                }
                 let _ = events.send(SessionEvent::SftpStatus(format!(
                     "{} {}...",
                     t("加载", "Loading"),
                     path
                 )));
-                match resolve_nav_path(&sftp, &path).await {
-                    Ok(nav) => match list_dir_impl(&sftp, &nav).await {
-                        Ok(entries) => {
-                            publish_dir_entries(
-                                &handle,
-                                &owner_cache,
-                                &names_ready_rx,
-                                &events,
-                                nav.clone(),
-                                entries,
-                            )
-                            .await;
-                            let _ = events.send(SessionEvent::SftpStatus(nav));
-                        }
-                        Err(e) => {
-                            let _ = events.send(SessionEvent::SftpError(list_error_msg(&nav, &e)));
-                        }
-                    },
+                match list_nav_dir(&sftp, &path).await {
+                    Ok((nav, entries)) => {
+                        dir_cache.lock().unwrap().insert(&nav, entries.clone());
+                        publish_dir_entries(
+                            &handle,
+                            &owner_cache,
+                            &names_ready_rx,
+                            &events,
+                            nav.clone(),
+                            entries,
+                        )
+                        .await;
+                        let _ = events.send(SessionEvent::SftpStatus(nav));
+                    }
                     Err(e) => {
-                        let _ = events.send(SessionEvent::SftpError(e.to_string()));
+                        let _ = events.send(SessionEvent::SftpError(list_error_msg(&path, &e)));
                     }
                 }
             }
 
             SftpCommand::RefreshDir(path) => {
-                // File panel — same as ListDir (follow symlink dirs).
+                // Force network re-list; drop any cached view of this path.
+                dir_cache.lock().unwrap().invalidate(&path);
                 let _ = events.send(SessionEvent::SftpStatus(format!(
                     "{} {}...",
                     t("加载", "Loading"),
                     path
                 )));
-                match resolve_nav_path(&sftp, &path).await {
-                    Ok(nav) => match list_dir_impl(&sftp, &nav).await {
-                        Ok(entries) => {
-                            publish_dir_entries(
-                                &handle,
-                                &owner_cache,
-                                &names_ready_rx,
-                                &events,
-                                nav.clone(),
-                                entries,
-                            )
-                            .await;
-                            let _ = events.send(SessionEvent::SftpStatus(nav.clone()));
-                        }
-                        Err(e) => {
-                            let _ = events.send(SessionEvent::SftpError(list_error_msg(&nav, &e)));
-                        }
-                    },
+                match list_nav_dir(&sftp, &path).await {
+                    Ok((nav, entries)) => {
+                        dir_cache.lock().unwrap().insert(&nav, entries.clone());
+                        publish_dir_entries(
+                            &handle,
+                            &owner_cache,
+                            &names_ready_rx,
+                            &events,
+                            nav.clone(),
+                            entries,
+                        )
+                        .await;
+                        let _ = events.send(SessionEvent::SftpStatus(nav.clone()));
+                    }
                     Err(e) => {
-                        let _ = events.send(SessionEvent::SftpError(e.to_string()));
+                        let _ = events.send(SessionEvent::SftpError(list_error_msg(&path, &e)));
                     }
                 }
                 // Tree — re-fetch every currently-expanded directory so deleted /
@@ -1028,6 +1062,7 @@ async fn run_sftp(
                 let events = events.clone();
                 let owner_cache = owner_cache.clone();
                 let names_ready_rx = names_ready_rx.clone();
+                let dir_cache = dir_cache.clone();
                 // Register a cancel/pause gate up-front under the file id.
                 let up_id = Uuid::new_v4().to_string();
                 let gate = Arc::new(TransferGate::default());
@@ -1067,6 +1102,7 @@ async fn run_sftp(
                         )
                         .await;
                         if let Ok(entries) = list_dir_impl(&sftp, &remote_dir).await {
+                            dir_cache.lock().unwrap().insert(&remote_dir, entries.clone());
                             publish_dir_entries(
                                 &handle,
                                 &owner_cache,
@@ -1128,6 +1164,7 @@ async fn run_sftp(
                         {
                             Ok(true) => {
                                 if let Ok(entries) = list_dir_impl(&sftp, &remote_dir).await {
+                                    dir_cache.lock().unwrap().insert(&remote_dir, entries.clone());
                                     publish_dir_entries(
                                         &handle,
                                         &owner_cache,
@@ -1147,6 +1184,7 @@ async fn run_sftp(
                             Ok(false) => {
                                 // Refresh the listing so the removed partial file disappears.
                                 if let Ok(entries) = list_dir_impl(&sftp, &remote_dir).await {
+                                    dir_cache.lock().unwrap().insert(&remote_dir, entries.clone());
                                     publish_dir_entries(
                                         &handle,
                                         &owner_cache,
@@ -1194,6 +1232,7 @@ async fn run_sftp(
                 let events = events.clone();
                 let owner_cache = owner_cache.clone();
                 let names_ready_rx = names_ready_rx.clone();
+                let dir_cache = dir_cache.clone();
                 transfers.spawn(async move {
                     let filename = base_name(&remote);
                     let remote_dir = parent_dir(&remote);
@@ -1206,6 +1245,7 @@ async fn run_sftp(
                     match result {
                         Ok(true) => {
                             if let Ok(entries) = list_dir_impl(&sftp, &remote_dir).await {
+                                dir_cache.lock().unwrap().insert(&remote_dir, entries.clone());
                                 publish_dir_entries(
                                     &handle,
                                     &owner_cache,
@@ -1295,7 +1335,13 @@ async fn run_sftp(
                 match res {
                     Ok(_) => {
                         let parent = parent_dir(&path);
+                        {
+                            let mut cache = dir_cache.lock().unwrap();
+                            cache.invalidate_prefix(&path);
+                            cache.invalidate(&parent);
+                        }
                         if let Ok(entries) = list_dir_impl(&sftp, &parent).await {
+                            dir_cache.lock().unwrap().insert(&parent, entries.clone());
                             publish_dir_entries(
                                 &handle,
                                 &owner_cache,
@@ -1345,9 +1391,15 @@ async fn run_sftp(
                         let prefix = format!("{}/", from.trim_end_matches('/'));
                         tree_dirs.retain(|p, _| p != &from && !p.starts_with(&prefix));
                         tree_expanded.retain(|p| p != &from && !p.starts_with(&prefix));
+                        {
+                            let mut cache = dir_cache.lock().unwrap();
+                            cache.invalidate_prefix(&from);
+                            cache.invalidate(&refresh);
+                        }
                         sync_tree_dir(&sftp, &refresh, &mut tree_dirs).await;
                         let to_parent = parent_dir(&to);
                         if to_parent != refresh {
+                            dir_cache.lock().unwrap().invalidate(&to_parent);
                             sync_tree_dir(&sftp, &to_parent, &mut tree_dirs).await;
                         }
                         emit_tree(&tree_dirs, &tree_expanded, &events);
@@ -1359,7 +1411,9 @@ async fn run_sftp(
                         )));
                     }
                 }
+                dir_cache.lock().unwrap().invalidate(&refresh);
                 if let Ok(entries) = list_dir_impl(&sftp, &refresh).await {
+                    dir_cache.lock().unwrap().insert(&refresh, entries.clone());
                     publish_dir_entries(&handle, &owner_cache, &names_ready_rx, &events, refresh, entries).await;
                 }
             }
@@ -1383,7 +1437,9 @@ async fn run_sftp(
                         )));
                     }
                 }
+                dir_cache.lock().unwrap().invalidate(&refresh);
                 if let Ok(entries) = list_dir_impl(&sftp, &refresh).await {
+                    dir_cache.lock().unwrap().insert(&refresh, entries.clone());
                     publish_dir_entries(&handle, &owner_cache, &names_ready_rx, &events, refresh, entries).await;
                 }
             }
@@ -1408,7 +1464,9 @@ async fn run_sftp(
                         )));
                     }
                 }
+                dir_cache.lock().unwrap().invalidate(&refresh);
                 if let Ok(entries) = list_dir_impl(&sftp, &refresh).await {
+                    dir_cache.lock().unwrap().insert(&refresh, entries.clone());
                     publish_dir_entries(&handle, &owner_cache, &names_ready_rx, &events, refresh, entries).await;
                 }
             }
@@ -1440,7 +1498,9 @@ async fn run_sftp(
                         }
                     }
                 }
+                dir_cache.lock().unwrap().invalidate(&refresh);
                 if let Ok(entries) = list_dir_impl(&sftp, &refresh).await {
+                    dir_cache.lock().unwrap().insert(&refresh, entries.clone());
                     publish_dir_entries(&handle, &owner_cache, &names_ready_rx, &events, refresh, entries).await;
                 }
             }
@@ -2019,6 +2079,9 @@ fn list_error_msg(path: &str, e: &impl std::fmt::Display) -> String {
 /// `canonicalize` so the panel lands on the real directory. Symlinks that
 /// resolve to a regular file are rejected — the UI should download those via
 /// the normal file action, not `ListDir`.
+///
+/// Prefer calling [`list_nav_dir`] which tries `read_dir` first and only falls
+/// back here on failure — that skips an extra RTT for ordinary directories.
 async fn resolve_nav_path(sftp: &SftpSession, path: &str) -> Result<String> {
     let link_meta = sftp.symlink_metadata(path).await.ok();
     let is_link = link_meta
@@ -2048,6 +2111,90 @@ async fn resolve_nav_path(sftp: &SftpSession, path: &str) -> Result<String> {
         );
     }
     Ok(resolved)
+}
+
+/// List a path for navigation: try `read_dir` first (no probe RTT). Only if
+/// that fails, resolve symlinks and retry — covers link-to-dir without taxing
+/// every ordinary folder open on a slow link.
+async fn list_nav_dir(sftp: &SftpSession, path: &str) -> Result<(String, Vec<RemoteEntry>)> {
+    match list_dir_impl(sftp, path).await {
+        Ok(entries) => Ok((path.to_string(), entries)),
+        Err(first) => match resolve_nav_path(sftp, path).await {
+            Ok(nav) if nav != path => match list_dir_impl(sftp, &nav).await {
+                Ok(entries) => Ok((nav, entries)),
+                Err(_) => Err(first),
+            },
+            Ok(_) => Err(first),
+            Err(e) => Err(e),
+        },
+    }
+}
+
+/// Per-connection LRU+TTL cache of directory listings. Cuts repeat `read_dir`
+/// cost when browsing back/forth on slow networks; Refresh and mutations
+/// invalidate so the panel stays coherent.
+const DIR_LIST_CACHE_CAP: usize = 32;
+const DIR_LIST_CACHE_TTL: Duration = Duration::from_secs(45);
+
+struct DirListCache {
+    map: HashMap<String, (Instant, Vec<RemoteEntry>)>,
+    order: VecDeque<String>,
+}
+
+impl DirListCache {
+    fn new() -> Self {
+        Self {
+            map: HashMap::new(),
+            order: VecDeque::new(),
+        }
+    }
+
+    fn get(&mut self, path: &str) -> Option<Vec<RemoteEntry>> {
+        let fresh = self
+            .map
+            .get(path)
+            .map(|(at, _)| at.elapsed() < DIR_LIST_CACHE_TTL)
+            .unwrap_or(false);
+        if !fresh {
+            if self.map.remove(path).is_some() {
+                self.order.retain(|p| p != path);
+            }
+            return None;
+        }
+        if let Some(pos) = self.order.iter().position(|p| p == path) {
+            if let Some(p) = self.order.remove(pos) {
+                self.order.push_back(p);
+            }
+        }
+        self.map.get(path).map(|(_, e)| e.clone())
+    }
+
+    fn insert(&mut self, path: &str, entries: Vec<RemoteEntry>) {
+        if self.map.contains_key(path) {
+            self.order.retain(|p| p != path);
+        }
+        self.map.insert(path.to_string(), (Instant::now(), entries));
+        self.order.push_back(path.to_string());
+        while self.order.len() > DIR_LIST_CACHE_CAP {
+            if let Some(old) = self.order.pop_front() {
+                self.map.remove(&old);
+            }
+        }
+    }
+
+    fn invalidate(&mut self, path: &str) {
+        if self.map.remove(path).is_some() {
+            self.order.retain(|p| p != path);
+        }
+    }
+
+    fn invalidate_prefix(&mut self, path: &str) {
+        let prefix = format!("{}/", path.trim_end_matches('/'));
+        self.order
+            .retain(|p| p != path && !p.starts_with(&prefix));
+        self.map
+            .retain(|p, _| p != path && !p.starts_with(&prefix));
+    }
 }
 
 async fn list_dir_impl(sftp: &SftpSession, path: &str) -> Result<Vec<RemoteEntry>> {

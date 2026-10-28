@@ -317,6 +317,10 @@ fn migrate_defaults(cfg: &mut ConfigFile) -> bool {
             cfg.wallpaper_overlay = DEFAULT_WALLPAPER_OVERLAY;
         }
     }
+    // rev 5: turn off the startup GitHub update check for everyone once.
+    if cfg.defaults_rev < 5 {
+        cfg.update_check_disabled = true;
+    }
     cfg.defaults_rev = DEFAULTS_REV;
     true
 }

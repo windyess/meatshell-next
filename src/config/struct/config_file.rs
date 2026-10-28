@@ -35,7 +35,11 @@ fn default_wallpaper() -> String {
 }
 
 /// Bump when `migrate_defaults` gains a new one-time default-layout change.
-pub const DEFAULTS_REV: u32 = 4;
+pub const DEFAULTS_REV: u32 = 5;
+
+fn default_update_check_disabled() -> bool {
+    true
+}
 
 pub(crate) const PREVIOUS_DEFAULT_WALLPAPER_TRANSPARENCY: f32 = 0.38;
 pub(crate) const PREVIOUS_DEFAULT_WALLPAPER_OVERLAY: f32 =
@@ -324,10 +328,10 @@ pub struct ConfigFile {
     /// SFTP column-header font size in px. 0 = 13.
     #[serde(default)]
     pub sftp_header_font_px: u32,
-    /// Disable the startup "new version available" check (#184). Default false =
-    /// keep checking (preserves existing behaviour for upgrading users); turning
-    /// it on stops the GitHub releases query and the banner.
-    #[serde(default)]
+    /// Disable the startup "new version available" check (#184). Default true =
+    /// no GitHub releases query / update banner (rev 5 migration turns it off
+    /// for existing installs too). Users can re-enable in Settings.
+    #[serde(default = "default_update_check_disabled")]
     pub update_check_disabled: bool,
     /// Enable the local stdio MCP server (`meatshell mcp serve`).
     #[serde(default = "default_mcp_preview_enabled")]

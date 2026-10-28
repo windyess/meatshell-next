@@ -50,6 +50,58 @@ fn publish_sftp_clipboard_count(core: &AppCore) {
     }
 }
 
+/// Inject `cp -a` / `mv` for staged SFTP clipboard paths, then refresh listings.
+/// Move clears the clipboard afterwards (sources no longer exist at origin).
+fn run_sftp_clipboard_paste(
+    w: &AppWindow,
+    handles: &Rc<RefCell<HashMap<String, SessionHandle>>>,
+    sftp_handles: &SftpHandles,
+    core: &AppCore,
+    tab_id: &str,
+    sources: &[String],
+    dest_dir: &str,
+    is_move: bool,
+) {
+    let Some(cmd) = (if is_move {
+        build_remote_move_command(sources, dest_dir)
+    } else {
+        build_remote_copy_command(sources, dest_dir)
+    }) else {
+        return;
+    };
+    let (_history, bytes) = encode_command_bar_input(&cmd);
+    if let Some(handle) = handles.borrow().get(tab_id) {
+        handle.send_raw(bytes);
+    }
+    // Refresh source parents first (move only), then always end on the
+    // destination so the panel stays in the directory the user pasted into.
+    let mut refresh_dirs: Vec<String> = Vec::new();
+    if is_move {
+        for src in sources {
+            let parent = parent_path(src);
+            if parent != dest_dir && !refresh_dirs.iter().any(|d| d == &parent) {
+                refresh_dirs.push(parent);
+            }
+        }
+        core.sftp_clipboard.borrow_mut().clear();
+        core.sftp_clipboard_is_move.set(false);
+        publish_sftp_clipboard_count(core);
+        w.set_sftp_clipboard_count(0);
+    }
+    refresh_dirs.push(dest_dir.to_string());
+    let tab = tab_id.to_string();
+    let sftp_handles = sftp_handles.clone();
+    slint::Timer::single_shot(std::time::Duration::from_millis(800), move || {
+        if let Ok(guard) = sftp_handles.lock() {
+            if let Some(h) = guard.get(&tab) {
+                for dir in refresh_dirs {
+                    h.refresh_dir(dir);
+                }
+            }
+        }
+    });
+}
+
 pub(super) fn wire_sftp_callbacks(
     window: &AppWindow,
     editor: &EditorWindow,
@@ -792,8 +844,70 @@ pub(super) fn wire_sftp_callbacks(
                 return;
             }
             *core.sftp_clipboard.borrow_mut() = paths;
+            core.sftp_clipboard_is_move.set(false);
             publish_sftp_clipboard_count(&core);
             w.set_sftp_clipboard_count(core.sftp_clipboard.borrow().len() as i32);
+        });
+    }
+    {
+        let core = core.clone();
+        let weak = window.as_weak();
+        window.on_sftp_move_files(move |tab_id: SharedString, menu_target: SharedString| {
+            let Some(w) = weak.upgrade() else { return };
+            let terminals = w.get_terminals();
+            let Some(tm) = terminals.as_any().downcast_ref::<VecModel<TerminalState>>() else {
+                return;
+            };
+            let paths = collect_copy_sources(tm, tab_id.as_str(), menu_target.as_str());
+            if paths.is_empty() {
+                return;
+            }
+            *core.sftp_clipboard.borrow_mut() = paths;
+            core.sftp_clipboard_is_move.set(true);
+            publish_sftp_clipboard_count(&core);
+            w.set_sftp_clipboard_count(core.sftp_clipboard.borrow().len() as i32);
+        });
+    }
+    {
+        let core = core.clone();
+        let weak = window.as_weak();
+        // Copy and move both confirm with source + dest details before running.
+        window.on_sftp_paste_files(move |tab_id: SharedString| {
+            let Some(w) = weak.upgrade() else { return };
+            let sources = core.sftp_clipboard.borrow().clone();
+            if sources.is_empty() {
+                return;
+            }
+            let is_move = core.sftp_clipboard_is_move.get();
+            let dest_dir = terminal_sftp_paths(&w)
+                .get(tab_id.as_str())
+                .cloned()
+                .filter(|d| !d.is_empty())
+                .unwrap_or_else(|| "/".to_string());
+            let cmd_ok = if is_move {
+                build_remote_move_command(&sources, &dest_dir).is_some()
+            } else {
+                build_remote_copy_command(&sources, &dest_dir).is_some()
+            };
+            if !cmd_ok {
+                return;
+            }
+            let mut detail = String::new();
+            detail.push_str(t("来源：", "Source:"));
+            detail.push('\n');
+            for src in &sources {
+                detail.push_str(src);
+                detail.push('\n');
+            }
+            detail.push('\n');
+            detail.push_str(t("目标目录：", "Destination:"));
+            detail.push('\n');
+            detail.push_str(&dest_dir);
+            *core.sftp_pending_move_dest.borrow_mut() = Some(dest_dir);
+            w.set_confirm_paste_is_move(is_move);
+            w.set_confirm_move_tab(tab_id);
+            w.set_confirm_move_detail(detail.into());
+            w.set_confirm_move_open(true);
         });
     }
     {
@@ -801,34 +915,32 @@ pub(super) fn wire_sftp_callbacks(
         let handles = handles.clone();
         let sftp_handles = sftp_handles.clone();
         let weak = window.as_weak();
-        window.on_sftp_paste_files(move |tab_id: SharedString| {
+        window.on_sftp_move_confirmed(move |tab_id: SharedString| {
             let Some(w) = weak.upgrade() else { return };
+            w.set_confirm_move_open(false);
             let sources = core.sftp_clipboard.borrow().clone();
+            let dest_dir = core.sftp_pending_move_dest.borrow_mut().take();
             if sources.is_empty() {
                 return;
             }
-            let dest_dir = terminal_sftp_paths(&w)
-                .get(tab_id.as_str())
-                .cloned()
-                .filter(|d| !d.is_empty())
-                .unwrap_or_else(|| "/".to_string());
-            let Some(cmd) = build_remote_copy_command(&sources, &dest_dir) else {
-                return;
-            };
-            let (_history, bytes) = encode_command_bar_input(&cmd);
-            if let Some(handle) = handles.borrow().get(tab_id.as_str()) {
-                handle.send_raw(bytes);
-            }
-            let refresh_path = dest_dir.clone();
-            let tab = tab_id.to_string();
-            let sftp_handles = sftp_handles.clone();
-            slint::Timer::single_shot(std::time::Duration::from_millis(800), move || {
-                if let Ok(guard) = sftp_handles.lock() {
-                    if let Some(h) = guard.get(&tab) {
-                        h.refresh_dir(refresh_path);
-                    }
-                }
-            });
+            let Some(dest_dir) = dest_dir else { return };
+            let is_move = core.sftp_clipboard_is_move.get();
+            run_sftp_clipboard_paste(
+                &w,
+                &handles,
+                &sftp_handles,
+                &core,
+                tab_id.as_str(),
+                &sources,
+                &dest_dir,
+                is_move,
+            );
+        });
+    }
+    {
+        let core = core.clone();
+        window.on_sftp_move_cancelled(move || {
+            *core.sftp_pending_move_dest.borrow_mut() = None;
         });
     }
     {

@@ -256,6 +256,8 @@ pub fn run(_intent: crate::app::launch::LaunchIntent) -> Result<()> {
         tab_routes: Arc::new(Mutex::new(HashMap::new())),
         first_window_done: Cell::new(false),
         sftp_clipboard: Rc::new(RefCell::new(Vec::new())),
+        sftp_clipboard_is_move: Cell::new(false),
+        sftp_pending_move_dest: RefCell::new(None),
     });
 
     // IPC listener: forwarded "new-window" requests arrive on the listener
