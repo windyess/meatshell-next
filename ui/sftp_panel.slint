@@ -1076,19 +1076,6 @@ export component SftpPanel inherits Rectangle {
                         }
                     }
 
-                    if root.loading : Rectangle {
-                        width: parent.width;
-                        height: parent.height;
-                        Text {
-                            text: @tr("Loading...");
-                            color: Theme.text-muted;
-                            font-size: Theme.sftp-fs-sm;
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
-                            width: parent.width; height: parent.height;
-                        }
-                    }
-
                     if !root.loading && root.entries.length == 0 : Rectangle {
                         width: parent.width;
                         height: parent.height;
@@ -1236,6 +1223,23 @@ export component SftpPanel inherits Rectangle {
                                     width: 84px; horizontal-alignment: right; vertical-alignment: center;
                                 }
                             }
+                        }
+                    }
+
+                    // Above the ListView so "Loading..." is visible while the
+                    // previous listing stays dimmed underneath (weak-net nav).
+                    if root.loading : Rectangle {
+                        z: 100;
+                        width: parent.width;
+                        height: parent.height;
+                        background: Theme.bg-panel.with-alpha(0.55);
+                        Text {
+                            text: @tr("Loading...");
+                            color: Theme.text-muted;
+                            font-size: Theme.sftp-fs-sm;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                            width: parent.width; height: parent.height;
                         }
                     }
 

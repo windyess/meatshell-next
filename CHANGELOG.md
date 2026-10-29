@@ -5,6 +5,11 @@ All notable changes are documented here. 本文件记录所有重要变更。
 
 ## Unreleased
 
+## [0.7.16] - 2026-10-29
+
+- **优化弱网下 SFTP 浏览。** 树与文件列表共用目录缓存，避免重复 `read_dir`；过期的 ListDir 结果丢弃；刷新只重列当前目录；owner `getent` 移出导航关键路径；切换目录立即显示 loading 遮罩。
+- **Smoother SFTP browsing on weak networks.** Tree and file list share the directory cache (no duplicate `read_dir`); stale ListDir results are dropped; refresh re-lists only the current folder; owner `getent` is off the navigation critical path; folder switches show a loading overlay immediately.
+
 ## [0.7.15] - 2026-10-29
 
 - **优化 SFTP 大目录性能。** 文件列表改为虚拟滚动（ListView），仅创建可见行；≥1500 项时 owner 解析后再单次刷新，后续回填就地更新，避免上万文件时整表卡顿。

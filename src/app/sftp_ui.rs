@@ -352,6 +352,25 @@ pub(super) fn try_patch_sftp_owners(
     false
 }
 
+/// Show / hide the SFTP panel loading overlay for a tab (navigation / refresh).
+pub(super) fn set_sftp_loading(terminals: &VecModel<TerminalState>, tab_id: &str, loading: bool) {
+    for ti in 0..terminals.row_count() {
+        let Some(row) = terminals.row_data(ti) else {
+            continue;
+        };
+        if row.id.as_str() != tab_id {
+            continue;
+        }
+        if row.sftp_loading == loading {
+            break;
+        }
+        let mut r = row.clone();
+        r.sftp_loading = loading;
+        terminals.set_row_data(ti, r);
+        break;
+    }
+}
+
 /// Uncheck every SFTP entry for a tab and reset its selected-count (#100).
 pub(super) fn clear_sftp_selection(terminals: &VecModel<TerminalState>, tab_id: &str) {
     for ti in 0..terminals.row_count() {

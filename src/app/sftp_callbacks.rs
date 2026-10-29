@@ -141,6 +141,12 @@ pub(super) fn wire_sftp_callbacks(
             // Forget the followed cwd so the next real `cd` snaps the panel
             // back to the shell; `ls` and other commands must not.
             sftp_last_cwd.lock().unwrap().remove(&tab_id);
+            if let Some(w) = weak.upgrade() {
+                let terminals = w.get_terminals();
+                if let Some(tm) = terminals.as_any().downcast_ref::<VecModel<TerminalState>>() {
+                    set_sftp_loading(tm, &tab_id, true);
+                }
+            }
             if let Ok(handles) = sftp_handles.lock() {
                 if let Some(h) = handles.get(&tab_id) {
                     h.list_dir(resolved);
@@ -390,7 +396,8 @@ pub(super) fn wire_sftp_callbacks(
             let path = path.to_string();
             if let Ok(handles) = sftp_handles.lock() {
                 if let Some(h) = handles.get(&tab_id) {
-                    // Refresh re-syncs the left tree too, not just the file list (#189).
+                    // Refresh re-lists the current directory (and its tree node
+                    // if expanded). Mutations keep the rest of the tree in sync.
                     h.refresh_dir(path);
                 }
             }
@@ -404,6 +411,7 @@ pub(super) fn wire_sftp_callbacks(
             if let Some(w) = weak.upgrade() {
                 let terminals = w.get_terminals();
                 if let Some(tm) = terminals.as_any().downcast_ref::<VecModel<TerminalState>>() {
+                    set_sftp_loading(tm, &tab_id, true);
                     clear_sftp_selection(tm, &tab_id);
                 }
             }
@@ -414,12 +422,19 @@ pub(super) fn wire_sftp_callbacks(
     {
         let sftp_handles = sftp_handles.clone();
         let sftp_last_cwd = sftp_last_cwd.clone();
+        let weak = window.as_weak();
         window.on_sftp_tree_expand(move |tab_id: SharedString, path: SharedString| {
             let tab_id = tab_id.to_string();
             let path = path.to_string();
             // Forget the followed cwd (see on_sftp_navigate): the next `cd`
             // still snaps back; other commands do not.
             sftp_last_cwd.lock().unwrap().remove(&tab_id);
+            if let Some(w) = weak.upgrade() {
+                let terminals = w.get_terminals();
+                if let Some(tm) = terminals.as_any().downcast_ref::<VecModel<TerminalState>>() {
+                    set_sftp_loading(tm, &tab_id, true);
+                }
+            }
             if let Ok(handles) = sftp_handles.lock() {
                 if let Some(h) = handles.get(&tab_id) {
                     h.toggle_tree_node(path.clone());

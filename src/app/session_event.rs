@@ -226,7 +226,9 @@ pub(super) fn apply_session_event_to_window(
         }
         SessionEvent::SftpEntries { path, entries } => {
             // Owner-name follow-up: patch columns in place when the listing is
-            // unchanged, avoiding a second full VecModel rebuild.
+            // unchanged, avoiding a second full VecModel rebuild. Stale enrich
+            // for a previous folder is dropped in the SFTP worker via
+            // `last_published` before it reaches here.
             if try_patch_sftp_owners(terminals, tab_id, &path, &entries) {
                 update_terminal(&|t| t.sftp_loading = false);
                 return;
