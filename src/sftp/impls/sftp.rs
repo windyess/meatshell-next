@@ -558,13 +558,20 @@ async fn run_sftp(
             wait_owner_prefetch(&names_ready_rx, Duration::from_secs(3)).await;
             let mut entries = entries;
             let need = owner_cache.lock().unwrap().apply(&mut entries);
+            if !need.is_complete() && entries.len() >= LARGE_DIR_SINGLE_PAINT {
+                // Same as publish_dir_entries: one paint for huge home dirs.
+                let (enriched, _) =
+                    enrich_entries_with_owners(&handle, &owner_cache, entries).await;
+                entries = enriched;
+            }
             dir_cache.lock().unwrap().insert(&home, entries.clone());
             let _ = events.send(SessionEvent::SftpEntries {
                 path: home.clone(),
                 entries: entries.clone(),
             });
-            // Defer any remaining remote name lookup so directory-tree init can
-            // run first; the command loop's EnrichEntries repaints with names.
+            // Defer remaining name lookup for small listings so tree init can
+            // run first; EnrichEntries then patches owner columns in place.
+            let need = owner_cache.lock().unwrap().apply(&mut entries);
             if !need.is_complete() {
                 let _ = self_tx.send(SftpCommand::EnrichEntries {
                     path: home.clone(),
@@ -2454,11 +2461,15 @@ getent passwd 2>/dev/null; printf '\\n--MEATSHELL-GROUPS--\\n'; getent group 2>/
     cache.lock().unwrap().absorb_full_lookup(owners, groups);
 }
 
+/// Large listings pay heavily for a full UI model rebuild. Prefer one paint
+/// after owner names resolve instead of blank-then-repaint.
+const LARGE_DIR_SINGLE_PAINT: usize = 1500;
+
 /// Publish a directory listing to the UI with owner names filled in.
 ///
 /// Prefetch hit / warm cache → a single `SftpEntries` paint already carrying
-/// names. Otherwise the first paint leaves owner/group blank (never raw uid/gid)
-/// and a second paint lands once `getent` returns.
+/// names. Small incomplete listings paint blank owners first, then repaint once
+/// `getent` returns. Large listings wait for names and paint once.
 async fn publish_dir_entries(
     handle: &client::Handle<SftpClientHandler>,
     cache: &SharedOwnerCache,
@@ -2471,6 +2482,11 @@ async fn publish_dir_entries(
     let mut entries = entries;
     let need = cache.lock().unwrap().apply(&mut entries);
     if need.is_complete() {
+        let _ = events.send(SessionEvent::SftpEntries { path, entries });
+        return;
+    }
+    if entries.len() >= LARGE_DIR_SINGLE_PAINT {
+        let (entries, _) = enrich_entries_with_owners(handle, cache, entries).await;
         let _ = events.send(SessionEvent::SftpEntries { path, entries });
         return;
     }

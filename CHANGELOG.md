@@ -5,6 +5,11 @@ All notable changes are documented here. 本文件记录所有重要变更。
 
 ## Unreleased
 
+## [0.7.15] - 2026-10-29
+
+- **优化 SFTP 大目录性能。** 文件列表改为虚拟滚动（ListView），仅创建可见行；≥1500 项时 owner 解析后再单次刷新，后续回填就地更新，避免上万文件时整表卡顿。
+- **Faster SFTP browsing in large directories.** The file list uses a virtualized ListView; directories with ≥1500 entries paint once after owner names resolve, and follow-up name fills patch in place instead of rebuilding the whole model.
+
 ## [0.7.14] - 2026-10-28
 
 - **默认关闭启动时检查新版本。** 不再默认向 GitHub 查询 releases；已有安装会在下次启动经配置迁移关闭，设置里仍可手动打开。

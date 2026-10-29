@@ -1,5 +1,5 @@
 import { Theme } from "theme.slint";
-import { ScrollView } from "std-widgets.slint";
+import { ScrollView, ListView } from "std-widgets.slint";
 import { TabInfo } from "tabs.slint";
 
 // ---------------------------------------------------------------------------
@@ -1052,181 +1052,188 @@ export component SftpPanel inherits Rectangle {
                 }
                 Rectangle { height: 1px; background: Theme.border-subtle; }
 
-                // File list. The area fills the panel height so right-click works
-                // on the whitespace below the rows too (#84); the single menu
-                // below greys out item actions when nothing was hit.
+                // File list. ListView virtualizes rows so large directories (10k+)
+                // only instantiate visible items. Empty-area right-click (#84) is
+                // handled by a background TouchArea under the list.
                 file-area := Rectangle {
                     vertical-stretch: 1;
                     clip: true;
-                    ScrollView {
+
+                    // Right-click on whitespace (no row hit) opens the menu with
+                    // no target so item actions stay greyed out (#84).
+                    empty-area-ta := TouchArea {
                         width: parent.width;
                         height: parent.height;
-                        viewport-width: self.visible-width;
-                        viewport-height: max(self.visible-height, file-list.preferred-height);
+                        pointer-event(ev) => {
+                            if (ev.kind == PointerEventKind.down
+                                    && ev.button == PointerEventButton.right) {
+                                root.selected-row = -1;
+                                root.menu-target = "";
+                                root.menu-x = self.absolute-position.x + self.mouse-x - file-area.absolute-position.x;
+                                root.menu-y = self.absolute-position.y + self.mouse-y - file-area.absolute-position.y;
+                                file-menu.show();
+                            }
+                        }
+                    }
 
-                        file-list := VerticalLayout {
-                            spacing: 0;
+                    if root.loading : Rectangle {
+                        width: parent.width;
+                        height: parent.height;
+                        Text {
+                            text: @tr("Loading...");
+                            color: Theme.text-muted;
+                            font-size: Theme.sftp-fs-sm;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                            width: parent.width; height: parent.height;
+                        }
+                    }
 
-                            if root.loading : Rectangle {
-                                height: 40px;
-                                Text { text: @tr("Loading..."); color: Theme.text-muted; font-size: Theme.sftp-fs-sm;
-                                       horizontal-alignment: center; vertical-alignment: center; }
+                    if !root.loading && root.entries.length == 0 : Rectangle {
+                        width: parent.width;
+                        height: parent.height;
+                        Text {
+                            text: @tr("Empty directory");
+                            color: Theme.text-muted;
+                            font-size: Theme.sftp-fs-sm;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                            width: parent.width; height: parent.height;
+                        }
+                    }
+
+                    ListView {
+                        width: parent.width;
+                        height: parent.height;
+
+                        for entry[i] in root.entries : row := Rectangle {
+                            height: 28px;
+                            background: entry.selected
+                                ? Theme.accent.with-alpha(0.22)
+                                : (i == root.selected-row
+                                    ? Theme.accent.with-alpha(0.16)
+                                    : (row-ta.has-hover ? Theme.bg-hover : transparent));
+
+                            if i < root.entries.length - 1 : Rectangle {
+                                y: parent.height - 1px;
+                                height: 1px;
+                                width: parent.width;
+                                background: Theme.row-rule;
                             }
 
-                            if !root.loading && root.entries.length == 0 : Rectangle {
-                                height: 40px;
-                                Text { text: @tr("Empty directory"); color: Theme.text-muted; font-size: Theme.sftp-fs-sm;
-                                       horizontal-alignment: center; vertical-alignment: center; }
+                            row-ta := TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => { root.selected-row = i; }
+                                double-clicked => {
+                                    // Symlinks are not directories in the listing
+                                    // (mode is lrwx…); still open by navigating
+                                    // so the panel follows the target path.
+                                    if (entry.is-dir || entry.is-link) {
+                                        root.navigate(entry.full-path);
+                                    } else {
+                                        root.download-and-open(entry.full-path);
+                                    }
+                                }
+                                pointer-event(ev) => {
+                                    if (ev.kind == PointerEventKind.down
+                                            && ev.button == PointerEventButton.left) {
+                                        root.row-select(i, root.select-anchor, ev.modifiers.control, ev.modifiers.shift);
+                                        if (!ev.modifiers.shift) {
+                                            root.select-anchor = i;
+                                        }
+                                        root.selected-row = i;
+                                    }
+                                    if (ev.kind == PointerEventKind.down
+                                            && ev.button == PointerEventButton.right) {
+                                        root.selected-row = i;
+                                        if (!entry.selected) {
+                                            root.row-select(i, i, false, false);
+                                            root.select-anchor = i;
+                                        }
+                                        root.menu-target = entry.full-path;
+                                        root.menu-target-name = entry.name;
+                                        root.menu-target-is-dir = entry.is-dir;
+                                        root.menu-target-mode = entry.mode;
+                                        root.menu-x = self.absolute-position.x + self.mouse-x - file-area.absolute-position.x;
+                                        root.menu-y = self.absolute-position.y + self.mouse-y - file-area.absolute-position.y;
+                                        file-menu.show();
+                                    }
+                                }
                             }
-
-                            for entry[i] in root.entries : row := Rectangle {
-                                height: 28px;
-                                background: entry.selected
-                                    ? Theme.accent.with-alpha(0.22)
-                                    : (i == root.selected-row
-                                        ? Theme.accent.with-alpha(0.16)
-                                        : (row-ta.has-hover ? Theme.bg-hover : transparent));
-
-                                if i < root.entries.length - 1 : Rectangle {
-                                    y: parent.height - 1px;
-                                    height: 1px;
-                                    width: parent.width;
-                                    background: Theme.row-rule;
-                                }
-
-                                row-ta := TouchArea {
-                                    mouse-cursor: pointer;
-                                    clicked => { root.selected-row = i; }
-                                    double-clicked => {
-                                        // Symlinks are not directories in the listing
-                                        // (mode is lrwx…); still open by navigating
-                                        // so the panel follows the target path.
-                                        if (entry.is-dir || entry.is-link) {
-                                            root.navigate(entry.full-path);
-                                        } else {
-                                            root.download-and-open(entry.full-path);
-                                        }
+                            HorizontalLayout {
+                                padding-left: 8px; padding-right: 8px; spacing: 0px;
+                                // Multi-select checkbox (#100). Its own TouchArea
+                                // sits above the row, so toggling doesn't trigger
+                                // navigate/select.
+                                Rectangle {
+                                    width: 16px;
+                                    y: (parent.height - self.height) / 2;
+                                    height: 16px;
+                                    border-radius: 3px;
+                                    border-width: 1px;
+                                    border-color: entry.selected ? Theme.accent : Theme.border-strong;
+                                    background: entry.selected ? Theme.accent : transparent;
+                                    cb-ta := TouchArea {
+                                        mouse-cursor: pointer;
+                                        clicked => { root.toggle-select(i); }
                                     }
-                                    pointer-event(ev) => {
-                                        if (ev.kind == PointerEventKind.down
-                                                && ev.button == PointerEventButton.left) {
-                                            root.row-select(i, root.select-anchor, ev.modifiers.control, ev.modifiers.shift);
-                                            if (!ev.modifiers.shift) {
-                                                root.select-anchor = i;
-                                            }
-                                            root.selected-row = i;
-                                        }
-                                        if (ev.kind == PointerEventKind.down
-                                                && ev.button == PointerEventButton.right) {
-                                            root.selected-row = i;
-                                            if (!entry.selected) {
-                                                root.row-select(i, i, false, false);
-                                                root.select-anchor = i;
-                                            }
-                                            root.menu-target = entry.full-path;
-                                            root.menu-target-name = entry.name;
-                                            root.menu-target-is-dir = entry.is-dir;
-                                            root.menu-target-mode = entry.mode;
-                                            root.menu-x = self.absolute-position.x + self.mouse-x - file-area.absolute-position.x;
-                                            root.menu-y = self.absolute-position.y + self.mouse-y - file-area.absolute-position.y;
-                                            file-menu.show();
-                                        }
+                                    if entry.selected : Text {
+                                        text: "\u{E5CA}"; // check
+                                        font-family: "Material Icons";
+                                        color: #ffffff;
+                                        font-size: Theme.sftp-fs-md;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                        width: parent.width; height: parent.height;
                                     }
                                 }
+
                                 HorizontalLayout {
-                                    padding-left: 8px; padding-right: 8px; spacing: 0px;
-                                    // Multi-select checkbox (#100). Its own TouchArea
-                                    // sits above the row, so toggling doesn't trigger
-                                    // navigate/select.
-                                    Rectangle {
-                                        width: 16px;
+                                    horizontal-stretch: 1;
+                                    min-width: root.name-min;
+                                    spacing: 4px;
+                                    SftpFileIcon {
+                                        kind: entry.icon-kind;
                                         y: (parent.height - self.height) / 2;
-                                        height: 16px;
-                                        border-radius: 3px;
-                                        border-width: 1px;
-                                        border-color: entry.selected ? Theme.accent : Theme.border-strong;
-                                        background: entry.selected ? Theme.accent : transparent;
-                                        cb-ta := TouchArea {
-                                            mouse-cursor: pointer;
-                                            clicked => { root.toggle-select(i); }
-                                        }
-                                        if entry.selected : Text {
-                                            text: "\u{E5CA}"; // check
-                                            font-family: "Material Icons";
-                                            color: #ffffff;
-                                            font-size: Theme.sftp-fs-md;
-                                            horizontal-alignment: center;
-                                            vertical-alignment: center;
-                                            width: parent.width; height: parent.height;
-                                        }
                                     }
-
-                                    HorizontalLayout {
+                                    Text {
+                                        text: entry.name;
+                                        color: Theme.text-primary;
+                                        font-size: Theme.sftp-fs-lg;
                                         horizontal-stretch: 1;
-                                        min-width: root.name-min;
-                                        spacing: 4px;
-                                        SftpFileIcon {
-                                            kind: entry.icon-kind;
-                                            y: (parent.height - self.height) / 2;
-                                        }
-                                        Text {
-                                            text: entry.name;
-                                            color: Theme.text-primary;
-                                            font-size: Theme.sftp-fs-lg;
-                                            horizontal-stretch: 1;
-                                            overflow: elide;
-                                            vertical-alignment: center;
-                                        }
-                                    }
-                                    if root.show-size-col : Text {
-                                        text: entry.is-dir ? "" : entry.size;
-                                        color: Theme.text-secondary; font-size: Theme.sftp-fs-md;
-                                        width: 72px; horizontal-alignment: right; vertical-alignment: center;
-                                    }
-                                    if root.show-modified-col : Text {
-                                        text: entry.modified;
-                                        color: Theme.text-muted; font-size: Theme.sftp-fs-md;
-                                        width: 116px; horizontal-alignment: right; vertical-alignment: center;
-                                    }
-                                    if root.show-type-col : Text {
-                                        text: entry.file-type;
-                                        color: Theme.text-secondary; font-size: Theme.sftp-fs-md;
-                                        width: 100px; horizontal-alignment: right; vertical-alignment: center;
-                                    }
-                                    if root.show-permissions-col : Text {
-                                        text: entry.permissions;
-                                        color: Theme.text-secondary; font-size: Theme.sftp-fs-md;
-                                        width: 104px; horizontal-alignment: right; vertical-alignment: center;
-                                    }
-                                    if root.show-owner-col : Text {
-                                        text: entry.owner;
-                                        color: Theme.text-secondary; font-size: Theme.sftp-fs-md;
-                                        width: 84px; horizontal-alignment: right; vertical-alignment: center;
-                                    }
-                                    if root.show-group-col : Text {
-                                        text: entry.group;
-                                        color: Theme.text-secondary; font-size: Theme.sftp-fs-md;
-                                        width: 84px; horizontal-alignment: right; vertical-alignment: center;
+                                        overflow: elide;
+                                        vertical-alignment: center;
                                     }
                                 }
-                            }
-
-                            // Whitespace below the rows: right-click here opens the
-                            // menu with no target (item actions greyed out) (#84).
-                            ws := Rectangle {
-                                vertical-stretch: 1;
-                                min-height: 24px;
-                                ws-ta := TouchArea {
-                                    pointer-event(ev) => {
-                                        if (ev.kind == PointerEventKind.down
-                                                && ev.button == PointerEventButton.right) {
-                                            root.selected-row = -1;
-                                            root.menu-target = "";
-                                            root.menu-x = self.absolute-position.x + self.mouse-x - file-area.absolute-position.x;
-                                            root.menu-y = self.absolute-position.y + self.mouse-y - file-area.absolute-position.y;
-                                            file-menu.show();
-                                        }
-                                    }
+                                if root.show-size-col : Text {
+                                    text: entry.is-dir ? "" : entry.size;
+                                    color: Theme.text-secondary; font-size: Theme.sftp-fs-md;
+                                    width: 72px; horizontal-alignment: right; vertical-alignment: center;
+                                }
+                                if root.show-modified-col : Text {
+                                    text: entry.modified;
+                                    color: Theme.text-muted; font-size: Theme.sftp-fs-md;
+                                    width: 116px; horizontal-alignment: right; vertical-alignment: center;
+                                }
+                                if root.show-type-col : Text {
+                                    text: entry.file-type;
+                                    color: Theme.text-secondary; font-size: Theme.sftp-fs-md;
+                                    width: 100px; horizontal-alignment: right; vertical-alignment: center;
+                                }
+                                if root.show-permissions-col : Text {
+                                    text: entry.permissions;
+                                    color: Theme.text-secondary; font-size: Theme.sftp-fs-md;
+                                    width: 104px; horizontal-alignment: right; vertical-alignment: center;
+                                }
+                                if root.show-owner-col : Text {
+                                    text: entry.owner;
+                                    color: Theme.text-secondary; font-size: Theme.sftp-fs-md;
+                                    width: 84px; horizontal-alignment: right; vertical-alignment: center;
+                                }
+                                if root.show-group-col : Text {
+                                    text: entry.group;
+                                    color: Theme.text-secondary; font-size: Theme.sftp-fs-md;
+                                    width: 84px; horizontal-alignment: right; vertical-alignment: center;
                                 }
                             }
                         }

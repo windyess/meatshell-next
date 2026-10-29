@@ -282,6 +282,76 @@ pub(super) fn apply_list_selection(
     }
 }
 
+/// If `path` is already shown with the same set of entries, patch owner/group
+/// in place (by `full_path`, order-independent) and keep selection. Used for
+/// the getent follow-up paint so directories avoid a second full model rebuild.
+pub(super) fn try_patch_sftp_owners(
+    terminals: &VecModel<TerminalState>,
+    tab_id: &str,
+    path: &str,
+    entries: &[crate::ssh::RemoteEntry],
+) -> bool {
+    use std::collections::HashMap;
+
+    for ti in 0..terminals.row_count() {
+        let Some(row) = terminals.row_data(ti) else {
+            continue;
+        };
+        if row.id.as_str() != tab_id {
+            continue;
+        }
+        if row.sftp_path.as_str() != path {
+            return false;
+        }
+        let Some(em) = row
+            .sftp_entries
+            .as_any()
+            .downcast_ref::<VecModel<SftpEntry>>()
+        else {
+            return false;
+        };
+        if em.row_count() != entries.len() {
+            return false;
+        }
+        let by_path: HashMap<&str, (&str, &str)> = entries
+            .iter()
+            .map(|e| {
+                (
+                    e.full_path.as_str(),
+                    (
+                        e.owner.as_deref().unwrap_or(""),
+                        e.group.as_deref().unwrap_or(""),
+                    ),
+                )
+            })
+            .collect();
+        for ei in 0..em.row_count() {
+            let Some(cur) = em.row_data(ei) else {
+                return false;
+            };
+            if !by_path.contains_key(cur.full_path.as_str()) {
+                return false;
+            }
+        }
+        for ei in 0..em.row_count() {
+            let Some(mut cur) = em.row_data(ei) else {
+                continue;
+            };
+            let Some(&(owner, group)) = by_path.get(cur.full_path.as_str()) else {
+                continue;
+            };
+            if cur.owner.as_str() == owner && cur.group.as_str() == group {
+                continue;
+            }
+            cur.owner = owner.into();
+            cur.group = group.into();
+            em.set_row_data(ei, cur);
+        }
+        return true;
+    }
+    false
+}
+
 /// Uncheck every SFTP entry for a tab and reset its selected-count (#100).
 pub(super) fn clear_sftp_selection(terminals: &VecModel<TerminalState>, tab_id: &str) {
     for ti in 0..terminals.row_count() {
