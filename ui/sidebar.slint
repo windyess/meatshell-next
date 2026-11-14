@@ -690,9 +690,9 @@ export component Sidebar inherits Rectangle {
             padding-left: 10px;
             padding-right: 10px;
             padding-top: 10px;
-            padding-bottom: 8px;
             spacing: 10px;
-            height: parent.height - version-label.preferred-height - 12px;
+            // Two blank lines between the last forwarding rule and the version.
+            height: parent.height - version-label.preferred-height * 3 - 8px;
             StatusBlock {
                 conn-state: root.conn-state;
                 connection-state: root.connection-state;
