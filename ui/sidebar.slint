@@ -464,8 +464,16 @@ component TunnelBlock inherits Rectangle {
     callback manage();
 
     background: transparent;
-    vertical-stretch: 1;
-    min-height: 44px;
+    // Hug the rules. A stretch here was the blank gap under the last rule.
+    in property <bool> hug-content: false;
+    property <length> list-h: (!root.available || root.tunnels.length == 0)
+        ? 16px
+        : min(66px, root.tunnels.length * 24px);
+    vertical-stretch: root.hug-content ? 0 : 1;
+    // Fixed min and max when hugging, so the block cannot eat the leftover
+    // sidebar height. Percent and px cannot share one ternary in Slint.
+    min-height: root.hug-content ? 24px + root.list-h : 44px;
+    max-height: root.hug-content ? 24px + root.list-h : 10000px;
 
     VerticalLayout {
         spacing: 4px;
@@ -505,17 +513,19 @@ component TunnelBlock inherits Rectangle {
             color: Theme.text-muted;
             font-size: Theme.fs-xs;
             wrap: word-wrap;
-            vertical-stretch: 1;
+            height: root.hug-content ? root.list-h : 16px;
         }
         if root.available && root.tunnels.length == 0 : Text {
             text: @tr("No forwarding rules");
             color: Theme.text-muted;
             font-size: Theme.fs-xs;
             horizontal-alignment: center;
-            vertical-stretch: 1;
+            height: root.hug-content ? root.list-h : 16px;
         }
         if root.available && root.tunnels.length > 0 : Flickable {
-            vertical-stretch: 1;
+            vertical-stretch: root.hug-content ? 0 : 1;
+            min-height: root.list-h;
+            max-height: root.hug-content ? root.list-h : 10000px;
             viewport-width: self.width;
             viewport-height: max(self.height, tun-col.preferred-height);
             tun-col := VerticalLayout {
@@ -702,15 +712,13 @@ export component Sidebar inherits Rectangle {
             }
             Rectangle { height: 1px; background: Theme.border-subtle; }
             TunnelBlock {
+                hug-content: true;
                 tunnels: root.tunnels;
                 available: root.tunnels-available;
                 start-rule(id) => { root.tunnel-start(id); }
                 stop-rule(id) => { root.tunnel-stop(id); }
                 manage() => { root.open-tunnels(); }
             }
-            // Same stretch as the tunnel list, so that block keeps half of the
-            // space it used to fill. The version line stays at the bottom.
-            Rectangle { vertical-stretch: 1; }
             Text {
                 text: "meatshell v" + root.app-version;
                 color: Theme.text-muted; font-size: Theme.fs-xs; horizontal-alignment: center;

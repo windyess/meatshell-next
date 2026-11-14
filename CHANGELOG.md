@@ -10,6 +10,9 @@ All notable changes are documented here. 本文件记录所有重要变更。
 - **快速连接可按端口搜索。** 输入端口，或 `主机:端口`，都能筛到对应会话。
 - **Quick Connect search includes the port.** A port number, or `host:port`, filters the session list.
 
+- **侧栏端口转发只按规则撑开。** 不再把磁盘列表下面的空白都算进转发区域。
+- **Sidebar port forwards hug their rules.** Leftover space under the disk list is no longer part of the forwarding block.
+
 ## [0.7.17] - 2026-11-14
 
 - **SFTP 列表默认按修改时间从新到旧，并在后台整理。** 文件大小、时间、图标和排序不再占住界面线程；最新的文件出现在第一行。
