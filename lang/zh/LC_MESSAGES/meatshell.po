@@ -591,8 +591,8 @@ msgstr "正在结束进程..."
 msgid "Terminate"
 msgstr "结束进程"
 
-msgid "Search by name or host..."
-msgstr "按名称或主机搜索..."
+msgid "Search by name, host, or port..."
+msgstr "按名称、主机或端口搜索..."
 
 msgid "No matching sessions"
 msgstr "没有匹配的会话"

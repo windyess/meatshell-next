@@ -150,9 +150,16 @@ fn normalized_query(query: &str) -> String {
 }
 
 fn session_matches_normalized_query(session: &Session, query: &str) -> bool {
-    query.is_empty()
-        || session.name.to_lowercase().contains(query)
+    if query.is_empty() {
+        return true;
+    }
+    let port = session.port.to_string();
+    // `host:port` lets a query like "2.84:58256" match, not only the port alone.
+    let endpoint = format!("{}:{port}", session.host.to_lowercase());
+    session.name.to_lowercase().contains(query)
         || session.host.to_lowercase().contains(query)
+        || port.contains(query)
+        || endpoint.contains(query)
 }
 
 #[cfg(test)]
@@ -680,6 +687,15 @@ mod search_tests {
         assert!(session_matches_query(&value, "  prod  "));
         assert!(session_matches_query(&value, "example.com"));
         assert!(!session_matches_query(&value, "staging"));
+    }
+
+    #[test]
+    fn session_search_matches_port_and_host_port() {
+        let mut value = session("1", "礼鼎BGA", "192.168.2.84", "prod");
+        value.port = 58256;
+        assert!(session_matches_query(&value, "58256"));
+        assert!(session_matches_query(&value, "2.84:58256"));
+        assert!(!session_matches_query(&value, "22"));
     }
 
     #[test]
