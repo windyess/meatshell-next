@@ -5,6 +5,11 @@ All notable changes are documented here. 本文件记录所有重要变更。
 
 ## Unreleased
 
+## [0.7.19] - 2026-11-14
+
+- **资源监控列表尽量完整显示，版本号固定在侧栏底部。** 磁盘分区不再被限制在固定高度，剩余空间都给列表；版本号钉在最下方。
+- **The resource list uses the leftover sidebar height, and the version stays at the bottom.** Disk rows are no longer capped at a fixed height; the version label is pinned to the bottom of the sidebar.
+
 ## [0.7.18] - 2026-11-14
 
 - **快速连接可按端口搜索。** 输入端口，或 `主机:端口`，都能筛到对应会话。

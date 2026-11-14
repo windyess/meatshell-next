@@ -395,6 +395,8 @@ component DiskBlock inherits Rectangle {
     private property <length> tip-y: tip-idx >= 0
         ? clamp(flick.y + tip-idx * 21px + flick.viewport-y + 20px, 2px, root.height - 28px) : 0px;
     VerticalLayout {
+        width: 100%;
+        height: 100%;
         spacing: 3px;
         HorizontalLayout {
             padding-left: 6px; padding-right: 6px;
@@ -675,9 +677,22 @@ export component Sidebar inherits Rectangle {
         border-color: Theme.border-subtle;
         clip: true;
 
+        version-label := Text {
+            y: parent.height - self.preferred-height - 8px;
+            width: parent.width;
+            horizontal-alignment: center;
+            text: "meatshell v" + root.app-version;
+            color: Theme.text-muted;
+            font-size: Theme.fs-xs;
+        }
         VerticalLayout {
-            padding: 10px;
+            width: 100%;
+            padding-left: 10px;
+            padding-right: 10px;
+            padding-top: 10px;
+            padding-bottom: 8px;
             spacing: 10px;
+            height: parent.height - version-label.preferred-height - 12px;
             StatusBlock {
                 conn-state: root.conn-state;
                 connection-state: root.connection-state;
@@ -707,7 +722,8 @@ export component Sidebar inherits Rectangle {
             }
             Rectangle { height: 1px; background: Theme.border-subtle; }
             DiskBlock {
-                height: min(150px, 22px + max(1, root.disks.length) * 21px);
+                vertical-stretch: 1;
+                min-height: 64px;
                 disks: root.disks;
             }
             Rectangle { height: 1px; background: Theme.border-subtle; }
@@ -718,10 +734,6 @@ export component Sidebar inherits Rectangle {
                 start-rule(id) => { root.tunnel-start(id); }
                 stop-rule(id) => { root.tunnel-stop(id); }
                 manage() => { root.open-tunnels(); }
-            }
-            Text {
-                text: "meatshell v" + root.app-version;
-                color: Theme.text-muted; font-size: Theme.fs-xs; horizontal-alignment: center;
             }
         }
     }
