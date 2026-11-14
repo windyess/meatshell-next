@@ -213,6 +213,9 @@ pub(super) fn apply_session_event_to_window(
             update_terminal(&|t| {
                 t.tunnels = ModelRc::from(std::rc::Rc::new(VecModel::from(items.clone())));
             });
+            if win.get_active_tab_id().as_str() == tab_id {
+                sync_sidebar_tunnels(win);
+            }
         }
 
         // --- SFTP events ---------------------------------------------------
@@ -233,79 +236,24 @@ pub(super) fn apply_session_event_to_window(
                 update_terminal(&|t| t.sftp_loading = false);
                 return;
             }
-            let mut slint_entries: Vec<SftpEntry> = entries
-                .iter()
-                .map(|e| {
-                    let icon_kind =
-                        sftp_entry_icon_kind(&e.name, e.is_dir, &e.file_type, e.mode);
-                    SftpEntry {
-                        name: e.name.clone().into(),
-                        full_path: e.full_path.clone().into(),
-                        is_dir: e.is_dir,
-                        is_link: e.file_type == "symlink",
-                        size: if e.is_dir {
-                            "".into()
-                        } else {
-                            format_size(e.size).into()
-                        },
-                        size_bytes: e.size as f32,
-                        modified: format_mtime(e.modified).into(),
-                        modified_ts: e.modified as f32,
-                        mode: (e.mode & 0o7777) as i32,
-                        file_type: match e.file_type.as_str() {
-                            "directory" => crate::i18n::t("文件夹", "Folder"),
-                            "symlink" => crate::i18n::t("符号链接", "Symbolic link"),
-                            "socket" => crate::i18n::t("套接字", "Socket"),
-                            "block-device" => crate::i18n::t("块设备", "Block device"),
-                            "character-device" => crate::i18n::t("字符设备", "Character device"),
-                            "fifo" => crate::i18n::t("管道", "FIFO"),
-                            _ => crate::i18n::t("文件", "File"),
-                        }
-                        .into(),
-                        permissions: crate::ssh::format_permissions(e.permissions_mode).into(),
-                        permissions_mode: e.permissions_mode as i32,
-                        // Unresolved owner/group stay blank instead of flashing the
-                        // raw uid/gid numbers — names land on the follow-up paint.
-                        owner: e.owner.clone().unwrap_or_default().into(),
-                        group: e.group.clone().unwrap_or_default().into(),
-                        selected: false,
-                        icon_kind,
-                    }
-                })
-                .collect();
+            // Format, icon lookup and sort run off this thread. The UI only
+            // swaps in the finished model. `sftp_selected_count` is cleared
+            // there too: the rebuilt rows are all unchecked, but the counter
+            // is a separate field and would otherwise keep a stale batch.
             let (sort_key, sort_dir) = (0..terminals.row_count())
                 .find_map(|i| {
                     let row = terminals.row_data(i)?;
-                    (row.id.as_str() == tab_id)
-                        .then(|| (row.sftp_sort_key.to_string(), row.sftp_sort_dir))
+                    (row.id.as_str() == tab_id).then(|| {
+                        (row.sftp_sort_key.to_string(), row.sftp_sort_dir)
+                    })
                 })
-                .unwrap_or_default();
-            sort_sftp_entries(&mut slint_entries, &sort_key, sort_dir);
-            let model = ModelRc::from(std::rc::Rc::new(VecModel::from(slint_entries)));
-            update_terminal(&|t| {
-                t.sftp_path = path.clone().into();
-                t.sftp_entries = model.clone();
-                t.sftp_loading = false;
-                // Reset the multi-select counter (#sftp-entries-selection).
-                // Every entry above is built with `selected: false`, so the
-                // rebuilt list is visually unchecked — but `sftp_selected_count`
-                // is a *separate* field on the tab row and is NOT derived from
-                // the entries, so it silently kept its stale value (e.g. "2")
-                // and the toolbar's count label plus the batch download/delete
-                // buttons stayed on screen until the user ticked a checkbox to
-                // force a recount.
-                // Clearing it here — where the list is actually rebuilt — fixes
-                // every path that reloads a directory at once: upload (both the
-                // SFTP panel button and shell drag-and-drop end in a `list_dir`
-                // + `SftpEntries` once the transfer finishes), download, delete,
-                // rename, mkdir, navigate and manual refresh. Future reload
-                // paths are covered automatically instead of needing another
-                // per-callback patch like the earlier `on_sftp_refresh` fix.
-                // NOTE: sorting is deliberately unaffected — it goes through
-                // `sorted_sftp_entries_from_model` in sftp_callbacks.rs, which
-                // re-sorts the existing rows and must preserve the selection.
-                t.sftp_selected_count = 0;
-            });
+                .unwrap_or_else(|| {
+                    (
+                        SFTP_DEFAULT_SORT_KEY.to_string(),
+                        SFTP_DEFAULT_SORT_DIR,
+                    )
+                });
+            schedule_sftp_listing(win, tab_id, path, entries, sort_key, sort_dir);
         }
         SessionEvent::SftpStatus(msg) => {
             update_terminal(&|t| t.sftp_status = msg.clone().into());

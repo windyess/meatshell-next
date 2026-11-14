@@ -32,6 +32,12 @@ export struct TermSpan {
     emoji-image: image,
 }
 
+// One visible grid row. The repeater updates a row in place when only that
+// row's runs change, instead of rebuilding every span on the screen.
+export struct TermLine {
+    spans: [TermSpan],
+}
+
 // A find-match highlight rectangle on the terminal grid.
 export struct TermMatch {
     row: int,
@@ -258,7 +264,7 @@ export component TerminalView inherits Rectangle {
     in property <int> focus-sequence;
     in property <string> tab-id;
     in property <string> status-line: @tr("Not connected");
-    in property <[TermSpan]> spans;     // coloured runs of the visible screen
+    in property <[TermLine]> spans;     // one entry per visible row
     in property <int> cursor-row;       // cursor cell (grid coords)
     in property <int> cursor-col;
     in property <string> cursor-style: "block";
@@ -277,8 +283,8 @@ export component TerminalView inherits Rectangle {
     in property <bool>    sftp-loading: false;
     in property <[SftpTreeNode]> sftp-tree-nodes: [];
     in property <[TabInfo]> sftp-transfer-targets: [];
-    in property <string> sftp-sort-key: "";
-    in property <int> sftp-sort-dir: 0;
+    in property <string> sftp-sort-key: "modified";
+    in property <int> sftp-sort-dir: -1;
     in property <bool> sftp-show-type: true;
     in property <bool> sftp-show-size: true;
     in property <bool> sftp-show-modified: true;
@@ -315,6 +321,13 @@ export component TerminalView inherits Rectangle {
     // Which edge of the terminal area the SFTP panel sits on: left|right|top|bottom.
     in-out property <string> sftp-dock: "bottom";
     in-out property <string> sftp-panel-mode: "files";
+    in property <int> open-tunnels-seq: 0;
+    changed open-tunnels-seq => {
+        if (root.active && root.open-tunnels-seq > 0 && root.sftp-available) {
+            root.sftp-panel-mode = "tunnels";
+            root.set-sftp-collapsed(false);
+        }
+    }
     property <bool> sftp-horizontal: root.sftp-dock == "left" || root.sftp-dock == "right";
     // Drag-to-dock snap state (mirrors the resource-panel docking in app.slint).
     property <bool> sftp-panel-dragging;
@@ -417,6 +430,7 @@ export component TerminalView inherits Rectangle {
     callback sftp-move-files(string /* menu-target */);
     callback sftp-paste-files();
     callback sftp-zip-files(string /* menu-target */);
+    callback sftp-extract-file(string /* menu-target */);
     callback sftp-cd-terminal(string /* path */);
     in property <int> sftp-clipboard-count;
     callback sftp-new-folder(string);
@@ -902,9 +916,15 @@ export component TerminalView inherits Rectangle {
                         // default bg) with its text on top.  Wrapping the Text in
                         // the bg Rectangle keeps one element per span and renders
                         // btop/htop/mc panels, meter bars and graph fills.
-                        for span in root.spans : Rectangle {
+                        // Rows are separate repeater items so an unchanged row
+                        // keeps its elements when only another line updates.
+                        for line[r] in root.spans : Rectangle {
+                            y: r * root.cell-h;
+                            width: parent.width;
+                            height: root.cell-h;
+                            for span in line.spans : Rectangle {
                             x: span.col * root.cell-w;
-                            y: span.row * root.cell-h;
+                            y: 0px;
                             width: span.cells * root.cell-w;
                             height: root.cell-h;
                             background: span.bg;
@@ -946,6 +966,7 @@ export component TerminalView inherits Rectangle {
                                 y: parent.height - self.height - max(1px, floor(root.cell-h / 10px) * 1px);
                                 width: parent.width;
                                 background: span.fg;
+                            }
                             }
                         }
 
@@ -2347,6 +2368,7 @@ export component TerminalView inherits Rectangle {
             move-files(path)    => { root.sftp-move-files(path); }
             paste-files()       => { root.sftp-paste-files(); }
             zip-files(path)     => { root.sftp-zip-files(path); }
+            extract-file(path)  => { root.sftp-extract-file(path); }
             cd-terminal(path)   => { root.sftp-cd-terminal(path); }
             new-folder(dir)     => { root.sftp-new-folder(dir); }
             new-file(dir)       => { root.sftp-new-file(dir); }

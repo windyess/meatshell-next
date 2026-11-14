@@ -469,14 +469,21 @@ pub(super) fn wire_sftp_callbacks(
             };
             update_terminal_row(tm, tab_id.as_str(), |row| {
                 let key = key.to_string();
-                let next_dir = if row.sftp_sort_key.as_str() != key || row.sftp_sort_dir == 0 {
-                    1
+                let cur_key = row.sftp_sort_key.to_string();
+                let (next_key, next_dir) = if cur_key != key {
+                    (key, 1)
                 } else if row.sftp_sort_dir > 0 {
-                    -1
+                    (cur_key, -1)
+                } else if cur_key == SFTP_DEFAULT_SORT_KEY {
+                    // Default is already modified/newest-first; the other click
+                    // is oldest-first.
+                    (cur_key, 1)
                 } else {
-                    0
+                    (
+                        SFTP_DEFAULT_SORT_KEY.to_string(),
+                        SFTP_DEFAULT_SORT_DIR,
+                    )
                 };
-                let next_key = if next_dir == 0 { String::new() } else { key };
                 row.sftp_entries =
                     sorted_sftp_entries_from_model(&row.sftp_entries, &next_key, next_dir);
                 row.sftp_sort_key = next_key.into();
@@ -493,9 +500,13 @@ pub(super) fn wire_sftp_callbacks(
                 return;
             };
             update_terminal_row(tm, tab_id.as_str(), |row| {
-                row.sftp_entries = sorted_sftp_entries_from_model(&row.sftp_entries, "", 0);
-                row.sftp_sort_key = "".into();
-                row.sftp_sort_dir = 0;
+                row.sftp_entries = sorted_sftp_entries_from_model(
+                    &row.sftp_entries,
+                    SFTP_DEFAULT_SORT_KEY,
+                    SFTP_DEFAULT_SORT_DIR,
+                );
+                row.sftp_sort_key = SFTP_DEFAULT_SORT_KEY.into();
+                row.sftp_sort_dir = SFTP_DEFAULT_SORT_DIR;
             });
         });
     }
@@ -978,6 +989,36 @@ pub(super) fn wire_sftp_callbacks(
                 .filter(|d| !d.is_empty())
                 .unwrap_or_else(|| "/".to_string());
             let Some(cmd) = build_remote_zip_command(&sources, &dest_dir) else {
+                return;
+            };
+            let (_history, bytes) = encode_command_bar_input(&cmd);
+            if let Some(handle) = handles.borrow().get(tab_id.as_str()) {
+                handle.send_raw(bytes);
+            }
+            let refresh_path = dest_dir.clone();
+            let tab = tab_id.to_string();
+            let sftp_handles = sftp_handles.clone();
+            slint::Timer::single_shot(std::time::Duration::from_millis(1500), move || {
+                if let Ok(guard) = sftp_handles.lock() {
+                    if let Some(h) = guard.get(&tab) {
+                        h.refresh_dir(refresh_path);
+                    }
+                }
+            });
+        });
+    }
+    {
+        let handles = handles.clone();
+        let sftp_handles = sftp_handles.clone();
+        let weak = window.as_weak();
+        window.on_sftp_extract_file(move |tab_id: SharedString, menu_target: SharedString| {
+            let Some(w) = weak.upgrade() else { return };
+            let dest_dir = terminal_sftp_paths(&w)
+                .get(tab_id.as_str())
+                .cloned()
+                .filter(|d| !d.is_empty())
+                .unwrap_or_else(|| "/".to_string());
+            let Some(cmd) = build_remote_extract_command(menu_target.as_str(), &dest_dir) else {
                 return;
             };
             let (_history, bytes) = encode_command_bar_input(&cmd);

@@ -226,6 +226,7 @@ fn build_session_rows(
         group_header: group.into(),
         collapsed: group_is_collapsed(group),
         builtin: false,
+        kind: "".into(),
     };
 
     let mut rows: Vec<SessionInfo> = Vec::new();
@@ -247,6 +248,7 @@ fn build_session_rows(
             group_header: if i == 0 { "system".into() } else { "".into() },
             collapsed: group_is_collapsed("system"),
             builtin: true,
+            kind: "local".into(),
         });
     }
     for group in &display_groups {
@@ -292,6 +294,7 @@ fn build_session_rows(
                     },
                     collapsed: group_is_collapsed(group),
                     builtin: false,
+                    kind: s.kind.as_str().into(),
                 });
             }
         }
@@ -427,6 +430,37 @@ pub(super) fn wsl_available() -> bool {
 // Session callbacks (welcome page + dialog)
 // ---------------------------------------------------------------------------
 
+/// What the session dialog's port box means after trimming and normalizing
+/// fullwidth digits (a Chinese IME often commits `２２２２` instead of `2222`).
+pub(super) enum DialogPort {
+    /// Blank: use the protocol default (22 / 23 / 3389).
+    Default,
+    Value(u16),
+    /// Non-empty text that is not a port. Callers must refuse to save this
+    /// rather than quietly substituting 22, which looks like the edit was ignored.
+    Invalid,
+}
+
+pub(super) fn parse_dialog_port(text: &str) -> DialogPort {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return DialogPort::Default;
+    }
+    let mut ascii = String::with_capacity(trimmed.len());
+    for c in trimmed.chars() {
+        if ('\u{FF10}'..='\u{FF19}').contains(&c) {
+            let digit = u32::from('0') + (u32::from(c) - u32::from('\u{FF10}'));
+            ascii.push(char::from_u32(digit).unwrap_or(c));
+        } else {
+            ascii.push(c);
+        }
+    }
+    match ascii.parse::<u16>() {
+        Ok(port) if port > 0 => DialogPort::Value(port),
+        _ => DialogPort::Invalid,
+    }
+}
+
 /// Build the effective session represented by the dialog. When editing, blank
 /// secret fields retain their saved values. Stored secrets only enter the UI
 /// after opting in and clicking the eye button (#10, #276).
@@ -484,10 +518,15 @@ pub(super) fn session_from_draft(
             draft.name.to_string()
         },
         host: draft.host.to_string(),
-        port: if draft.port <= 0 {
-            default_port
-        } else {
-            draft.port as u16
+        port: match parse_dialog_port(draft.port.as_str()) {
+            DialogPort::Value(port) => port,
+            DialogPort::Default => default_port,
+            // The dialog refuses to save an unparseable port. A caller that
+            // skips that check must not wipe a saved port back to 22.
+            DialogPort::Invalid => existing
+                .map(|session| session.port)
+                .filter(|port| *port > 0)
+                .unwrap_or(default_port),
         },
         user: draft.user.to_string(),
         auth: AuthMethod::from_str(&draft.auth.to_string()),
@@ -705,6 +744,44 @@ mod search_tests {
 }
 
 #[cfg(test)]
+mod dialog_port_tests {
+    use super::*;
+
+    #[test]
+    fn dialog_port_keeps_a_non_default_port() {
+        for text in ["2222", " 2222 ", "２２２２"] {
+            let mut draft = SessionDraft::default();
+            draft.kind = "ssh".into();
+            draft.host = "example.com".into();
+            draft.port = text.into();
+            let session = session_from_draft(&draft, None, vec![], vec![]);
+            assert_eq!(session.port, 2222, "{text}");
+        }
+    }
+
+    #[test]
+    fn blank_port_uses_the_protocol_default() {
+        let mut draft = SessionDraft::default();
+        draft.kind = "telnet".into();
+        draft.port = "  ".into();
+        let session = session_from_draft(&draft, None, vec![], vec![]);
+        assert_eq!(session.port, 23);
+    }
+
+    #[test]
+    fn unparseable_port_does_not_replace_a_saved_port_with_22() {
+        let mut saved = Session::new_empty();
+        saved.port = 2222;
+        let mut draft = SessionDraft::default();
+        draft.kind = "ssh".into();
+        draft.port = "22abc".into();
+        assert!(matches!(parse_dialog_port("22abc"), DialogPort::Invalid));
+        let session = session_from_draft(&draft, Some(&saved), vec![], vec![]);
+        assert_eq!(session.port, 2222);
+    }
+}
+
+#[cfg(test)]
 mod serial_display_tests {
     use super::*;
 
@@ -741,6 +818,7 @@ mod serial_display_tests {
             assert_eq!(rows[0].host.as_str(), "example.com");
             assert_eq!(rows[0].port, 2222);
             assert_eq!(rows[0].user.as_str(), "alice");
+            assert_eq!(rows[0].kind.as_str(), kind.as_str());
         }
     }
 }

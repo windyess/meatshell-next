@@ -345,6 +345,32 @@ pub(super) fn refresh_sidebar(
             show_local_system_models(win);
         }
     }
+    sync_sidebar_tunnels(win);
+}
+
+/// Copy the active terminal's port-forward list onto the sidebar.
+pub(super) fn sync_sidebar_tunnels(win: &AppWindow) {
+    let active = win.get_active_tab_id();
+    let terminals = win.get_terminals();
+    let Some(model) = terminals
+        .as_any()
+        .downcast_ref::<VecModel<TerminalState>>()
+    else {
+        win.set_sidebar_tunnels_available(false);
+        win.set_sidebar_tunnels(ModelRc::from(Rc::new(VecModel::<TunnelInfo>::default())));
+        return;
+    };
+    for i in 0..model.row_count() {
+        if let Some(row) = model.row_data(i) {
+            if row.id == active {
+                win.set_sidebar_tunnels_available(row.sftp_available);
+                win.set_sidebar_tunnels(row.tunnels.clone());
+                return;
+            }
+        }
+    }
+    win.set_sidebar_tunnels_available(false);
+    win.set_sidebar_tunnels(ModelRc::from(Rc::new(VecModel::<TunnelInfo>::default())));
 }
 
 /// Sidebar refresh on tab change, language switch and theme toggle.

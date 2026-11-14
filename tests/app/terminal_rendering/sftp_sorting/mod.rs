@@ -9,7 +9,7 @@ fn sftp_entry(name: &str, is_dir: bool) -> SftpEntry {
         size: String::new().into(),
         size_bytes: 0.0,
         modified: String::new().into(),
-        modified_ts: 0.0,
+        modified_ts: 0,
         mode: 0,
         file_type: if is_dir { "directory" } else { "file" }.into(),
         permissions: String::new().into(),
@@ -48,17 +48,28 @@ fn sftp_name_sort_uses_natural_numeric_order() {
 }
 
 #[test]
-fn sftp_default_sort_keeps_dirs_first_with_natural_names() {
+fn sftp_default_sort_is_newest_modified_first() {
     let mut entries = vec![
-        sftp_entry("file100", false),
-        sftp_entry("dir10", true),
-        sftp_entry("file11", false),
-        sftp_entry("dir2", true),
+        {
+            let mut e = sftp_entry("old-dir", true);
+            e.modified_ts = 10;
+            e
+        },
+        {
+            let mut e = sftp_entry("new-file", false);
+            e.modified_ts = 30;
+            e
+        },
+        {
+            let mut e = sftp_entry("mid-file", false);
+            e.modified_ts = 20;
+            e
+        },
     ];
     sort_sftp_entries(&mut entries, "", 0);
     assert_eq!(
         sftp_names(&entries),
-        vec!["dir2", "dir10", "file11", "file100"]
+        vec!["new-file", "mid-file", "old-dir"]
     );
 }
 

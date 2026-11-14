@@ -114,7 +114,9 @@ pub(crate) type RenderGates = Arc<Mutex<HashMap<String, Arc<TabRenderGate>>>>;
 
 /// A coloured, cursor-annotated snapshot ready for the Slint terminal grid.
 pub(crate) struct BuiltScreen {
-    pub(crate) spans: Vec<TermSpan>,
+    pub(crate) lines: Vec<Vec<TermSpan>>,
+    /// Stable per-row fingerprint. Equal key ⇒ the cached spans are unchanged.
+    pub(crate) line_keys: Vec<u64>,
     pub(crate) cursor_row: i32,
     pub(crate) cursor_col: i32,
     pub(crate) rows_used: i32,

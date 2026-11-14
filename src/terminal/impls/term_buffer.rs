@@ -717,6 +717,15 @@ impl TermBuffer {
     /// Render the terminal grid for the current scrollback `view_offset`
     /// (0 = live).  Caches the displayed plain text for find/selection.
     pub(crate) fn render(&mut self) -> BuiltScreen {
+        let mut cache = Vec::new();
+        self.render_cached(&mut cache)
+    }
+
+    /// Unchanged rows reuse `cache` (UI-thread only; `TermSpan` is not `Send`).
+    pub(crate) fn render_cached(
+        &mut self,
+        cache: &mut Vec<Option<(u64, Vec<crate::ui::TermSpan>)>>,
+    ) -> BuiltScreen {
         let (is_alt, rows, cols, cur_row, cur_col) = {
             let s = self.parser.screen();
             let (r, c) = s.size();
@@ -726,7 +735,8 @@ impl TermBuffer {
 
         // --- Live view (also alt-screen): render the current grid -----------
         if is_alt || self.view_offset == 0 {
-            let mut spans = Vec::new();
+            let mut lines = Vec::with_capacity(rows as usize);
+            let mut line_keys = Vec::with_capacity(rows as usize);
             let mut displayed = Vec::with_capacity(rows as usize);
             let mut last_content = 0i32;
             let s = self.parser.screen();
@@ -744,11 +754,13 @@ impl TermBuffer {
                 if !runs.is_empty() {
                     last_content = r as i32;
                 }
-                for hs in runs {
-                    spans.extend(render_term_span(&hs, r as i32, self.is_dark));
-                }
+                let key = row_cache_key(&plain, &runs, self.is_dark);
+                let spans = cached_row_spans(cache, r as usize, key, &runs, r as i32, self.is_dark);
+                line_keys.push(key);
+                lines.push(spans);
                 displayed.push(plain.trim_end().to_string());
             }
+            cache.truncate(rows as usize);
             self.displayed_text = displayed;
             let rows_used = if is_alt {
                 rows as i32
@@ -756,7 +768,8 @@ impl TermBuffer {
                 last_content + 1
             };
             return BuiltScreen {
-                spans,
+                lines,
+                line_keys,
                 cursor_row: cur_row as i32,
                 cursor_col: cur_col as i32,
                 rows_used,
@@ -784,7 +797,8 @@ impl TermBuffer {
         let start = combined_len.saturating_sub(win + self.view_offset);
         let end = (start + win).min(combined_len);
 
-        let mut spans = Vec::new();
+        let mut lines = Vec::with_capacity(win);
+        let mut line_keys = Vec::with_capacity(win);
         let mut displayed = Vec::with_capacity(win);
         for (d, idx) in (start..end).enumerate() {
             let line: &Line = if idx < hist_len {
@@ -797,17 +811,22 @@ impl TermBuffer {
                 self.output_highlight,
                 &self.custom_highlight_rules,
             );
-            for hs in &runs {
-                spans.extend(render_term_span(hs, d as i32, self.is_dark));
-            }
+            let key = row_cache_key(&line.0, &runs, self.is_dark);
+            let spans = cached_row_spans(cache, d, key, &runs, d as i32, self.is_dark);
+            line_keys.push(key);
+            lines.push(spans);
             displayed.push(line.0.trim_end().to_string());
         }
         while displayed.len() < win {
             displayed.push(String::new());
+            line_keys.push(0);
+            lines.push(Vec::new());
         }
+        cache.truncate(win);
         self.displayed_text = displayed;
         BuiltScreen {
-            spans,
+            lines,
+            line_keys,
             cursor_row: (self.parser.screen().cursor_position().0 as i32
                 + self.view_offset as i32)
                 .min(self.parser.screen().size().0 as i32),
@@ -819,4 +838,57 @@ impl TermBuffer {
             scroll_offset: self.view_offset as i32,
         }
     }
+
+}
+
+fn cached_row_spans(
+    cache: &mut Vec<Option<(u64, Vec<crate::ui::TermSpan>)>>,
+    row: usize,
+    key: u64,
+    runs: &[crate::terminal::HistSpan],
+    grid_row: i32,
+    is_dark: bool,
+) -> Vec<crate::ui::TermSpan> {
+    if cache.len() <= row {
+        cache.resize(row + 1, None);
+    }
+    if let Some((cached_key, spans)) = &cache[row] {
+        if *cached_key == key {
+            return spans.clone();
+        }
+    }
+    let mut spans = Vec::new();
+    for hs in runs {
+        spans.extend(render_term_span(hs, grid_row, is_dark));
+    }
+    cache[row] = Some((key, spans.clone()));
+    spans
+}
+
+fn color_bits(color: vt100::Color) -> u32 {
+    match color {
+        vt100::Color::Default => 0,
+        vt100::Color::Idx(index) => 0x0100_0000 | index as u32,
+        vt100::Color::Rgb(r, g, b) => {
+            0x0200_0000 | ((r as u32) << 16) | ((g as u32) << 8) | b as u32
+        }
+    }
+}
+
+fn row_cache_key(plain: &str, runs: &[crate::terminal::HistSpan], is_dark: bool) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    plain.hash(&mut hasher);
+    is_dark.hash(&mut hasher);
+    for run in runs {
+        run.text.hash(&mut hasher);
+        run.col.hash(&mut hasher);
+        run.cells.hash(&mut hasher);
+        run.bold.hash(&mut hasher);
+        run.inverse.hash(&mut hasher);
+        run.underline.hash(&mut hasher);
+        color_bits(run.fg).hash(&mut hasher);
+        color_bits(run.bg).hash(&mut hasher);
+    }
+    hasher.finish()
 }

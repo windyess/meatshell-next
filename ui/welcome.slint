@@ -15,6 +15,7 @@ export struct SessionInfo {
     group-header: string, // set on the first row of each group → render a header
     collapsed: bool,      // group is collapsed → this session row is hidden
     builtin: bool,        // built-in local shell, not a saved server session
+    kind: string,         // "ssh" | "telnet" | "rdp" | "serial" | "local" | ""
 }
 
 // --- SessionRow ------------------------------------------------------------
@@ -56,7 +57,20 @@ component SessionRow inherits Rectangle {
     property <bool> grab-dragging: false;
     property <length> grab-y;
 
-    height: root.compact ? 44px : 36px;
+    // A wide list (landscape / stretched panel) puts the name and the address
+    // on one line. A narrow sidebar keeps the name on its own line so it can wrap.
+    property <bool> wide: root.width >= 480px;
+    // Drag hops use this height. Narrow rows grow with a wrapped name.
+    height: root.wide ? 34px : max(40px, narrow-body.preferred-height);
+    property <string> kind-label: root.system-row ? @tr("Local")
+        : session.kind == "serial" ? @tr("Serial")
+        : session.kind == "telnet" ? "Telnet"
+        : session.kind == "rdp" ? "RDP"
+        : "SSH";
+    property <bool> show-port: !root.system-row && session.serial-detail == "" && session.port > 0;
+    property <string> address: session.serial-detail != "" ? session.serial-detail
+        : session.builtin ? session.host
+        : (session.user != "" ? session.user + "@" : "") + session.host;
     Rectangle {
         y: parent.height - 1px;
         height: 1px;
@@ -267,69 +281,85 @@ component SessionRow inherits Rectangle {
         animate background { duration: 120ms; }
         animate drop-shadow-blur { duration: 120ms; }
 
-    HorizontalLayout {
-        padding-left: 10px;
-        padding-right: 10px;
-        spacing: root.compact ? 8px : 12px;
-
-        Rectangle {
-            width: 18px; height: 18px;
-            y: (parent.height - self.height) / 2;
-            border-radius: 3px;
-            background: Theme.bg-elevated;
-            Text {
-                text: root.system-row ? "\u{E30A}" : "\u{E875}";   // terminal / server
-                font-family: "Material Icons";
-                color: Theme.text-secondary;
-                font-size: Theme.fs-sm;
-                horizontal-alignment: center;
-                vertical-alignment: center;
-            }
-        }
-
-        if root.compact : VerticalLayout {
-            horizontal-stretch: 1;
-            alignment: center;
-            spacing: 1px;
-            Text {
-                text: session.name;
-                color: Theme.text-primary;
-                font-size: Theme.fs-sm;
-                overflow: elide;
-            }
-            Text {
-                text: session.serial-detail != "" ? session.serial-detail
-                    : session.builtin ? session.host
-                    : (session.user != "" ? session.user + "@" : "")
-                        + (session.port > 0 ? session.host + ":" + session.port : session.host);
-                color: Theme.text-muted;
-                font-size: Theme.fs-xs;
-                overflow: elide;
-            }
-        }
-        if !root.compact : Text {
+    if root.wide : HorizontalLayout {
+        width: parent.width;
+        height: parent.height;
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 12px;
+        Text {
             text: session.name;
             color: Theme.text-primary;
-            font-size: Theme.fs-md;
-            vertical-alignment: center;
-            width: 180px;
-            overflow: elide;
-        }
-        if !root.compact : Text {
-            text: session.serial-detail != "" ? session.serial-detail
-                : session.port > 0 ? session.host + ":" + session.port : session.host;
-            color: Theme.text-secondary;
             font-size: Theme.fs-sm;
             vertical-alignment: center;
-            width: 180px;
             overflow: elide;
-        }
-        if !root.compact : Text {
-            text: session.serial-detail != "" ? "" : session.user;
-            color: Theme.text-secondary;
-            font-size: Theme.fs-sm;
-            vertical-alignment: center;
             horizontal-stretch: 1;
+        }
+        Text {
+            text: root.kind-label;
+            color: Theme.accent;
+            font-size: Theme.fs-xs;
+            font-weight: 600;
+            vertical-alignment: center;
+        }
+        if root.show-port : Text {
+            text: "" + session.port;
+            color: Theme.text-primary;
+            font-size: Theme.fs-xs;
+            font-weight: 600;
+            vertical-alignment: center;
+        }
+        Text {
+            text: root.address;
+            color: Theme.text-secondary;
+            font-size: Theme.fs-xs;
+            vertical-alignment: center;
+        }
+    }
+
+    narrow-body := VerticalLayout {
+        visible: !root.wide;
+        height: root.wide ? 0px : self.preferred-height;
+        padding-left: 12px;
+        padding-right: 12px;
+        padding-top: 7px;
+        padding-bottom: 7px;
+        spacing: 2px;
+
+        // The whole row width is for the name. Wrap instead of ellipsizing so
+        // a long session title stays readable in the narrow sidebar.
+        Text {
+            text: session.name;
+            width: 100%;
+            color: Theme.text-primary;
+            font-size: Theme.fs-sm;
+            wrap: word-wrap;
+        }
+
+        HorizontalLayout {
+            spacing: 6px;
+            Text {
+                text: root.kind-label;
+                color: Theme.accent;
+                font-size: Theme.fs-xs;
+                font-weight: 600;
+                vertical-alignment: center;
+            }
+            if root.show-port : Text {
+                text: "" + session.port;
+                color: Theme.text-primary;
+                font-size: Theme.fs-xs;
+                font-weight: 600;
+                vertical-alignment: center;
+            }
+            Text {
+                text: root.address;
+                color: Theme.text-secondary;
+                font-size: Theme.fs-xs;
+                overflow: elide;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+            }
         }
     }
     }
@@ -687,7 +717,7 @@ export component Welcome inherits Rectangle {
                         // Group header on the first row of each group (#41).
                         // Click anywhere on it to collapse / expand the group.
                         if session.group-header != "" : Rectangle {
-                            height: 26px;
+                            height: 30px;
                             Rectangle {
                                 y: parent.height - 1px;
                                 height: 1px;
@@ -720,9 +750,9 @@ export component Welcome inherits Rectangle {
                                 }
                                 Text {
                                     text: session.group-header;
-                                    color: Theme.text-muted;
-                                    font-size: Theme.fs-xs;
-                                    font-weight: 700;
+                                    color: Theme.text-secondary;
+                                    font-size: Theme.fs-sm;
+                                    font-weight: 600;
                                     vertical-alignment: center;
                                     horizontal-stretch: 1;       // fill → text stays left
                                     horizontal-alignment: left;

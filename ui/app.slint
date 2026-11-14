@@ -22,7 +22,7 @@ import { SessionDialog, SessionDraft, PortFwd, TriggerDraft, JumpHop } from "ses
 import { ConfirmDialog } from "confirm_dialog.slint";
 import { ModalLayer, ModalKind } from "modal.slint";
 import { LabeledInput, PrimaryButton, GhostButton, DockExpandButton, IconButton, ToolStrip } from "widgets.slint";
-import { TerminalView, TermSpan, TermMatch, QuickDockPanel } from "terminal_view.slint";
+import { TerminalView, TermSpan, TermLine, TermMatch, QuickDockPanel } from "terminal_view.slint";
 import { SftpEntry, SftpTreeNode, TunnelInfo, QuickCmd } from "sftp_panel.slint";
 import { ProcWindow, ProcRow } from "proc_window.slint";
 import { SystemInfoWindow, SysInfoRow, SysMetricRow, SysNetRow } from "system_info_window.slint";
@@ -53,7 +53,7 @@ export struct TransferInfo {
 export struct TerminalState {
     id: string,
     status: string,
-    spans: [TermSpan],     // coloured runs of the visible terminal screen
+    spans: [TermLine],     // one model row per visible terminal line
     cursor-row: int,       // cursor cell on the grid
     cursor-col: int,
     rows-used: int,        // content rows, for viewport sizing
@@ -71,8 +71,8 @@ export struct TerminalState {
     sftp-loading: bool,
     sftp-tree-nodes: [SftpTreeNode],
     sftp-selected-count: int,   // checked entries in the SFTP panel (#100)
-    sftp-sort-key: string,      // ""|"name"|"size"|"modified" (#248)
-    sftp-sort-dir: int,         // 0 default / 1 asc / -1 desc (#248)
+    sftp-sort-key: string,      // "modified" default; also name/size/... (#248)
+    sftp-sort-dir: int,         // 1 asc / -1 desc; default is modified desc
     sftp-available: bool,       // false for local/serial/telnet sessions
     font-size: int,             // per-session zoom override in px (0 = follow window)
     tunnels: [TunnelInfo],      // runtime SSH tunnels (#206)
@@ -384,6 +384,12 @@ export component AppWindow inherits Window {
     in property <string> net-selected;      // currently selected NIC
     in property <bool> net-show-selector;   // only on a live session tab
     in property <[DiskInfo]> disks;         // active tab's filesystem usage
+    in property <[TunnelInfo]> sidebar-tunnels; // active tab's port forwards
+    in property <bool> sidebar-tunnels-available: false;
+    in-out property <int> open-tunnels-seq: 0;
+    callback sidebar-tunnel-start(string /* tunnel-id */);
+    callback sidebar-tunnel-stop(string /* tunnel-id */);
+    callback sidebar-open-tunnels();
     in property <string> app-version;       // from Rust: env!("CARGO_PKG_VERSION")
     callback select-net-iface(string);
 
@@ -1197,6 +1203,7 @@ export component AppWindow inherits Window {
     callback sftp-move-confirmed(string /* tab-id */);
     callback sftp-move-cancelled();
     callback sftp-zip-files(string /* tab-id */, string /* menu-target */);
+    callback sftp-extract-file(string /* tab-id */, string /* menu-target */);
     callback sftp-cd-terminal(string /* tab-id */, string /* path */);
 
     // Visual chmod dialog (#84). Rust decomposes the current mode into nine
@@ -1756,6 +1763,11 @@ export component AppWindow inherits Window {
                 net-selected: root.net-selected;
                 net-show-selector: root.net-show-selector;
                 disks: root.disks;
+                tunnels: root.sidebar-tunnels;
+                tunnels-available: root.sidebar-tunnels-available;
+                tunnel-start(id) => { root.sidebar-tunnel-start(id); }
+                tunnel-stop(id) => { root.sidebar-tunnel-stop(id); }
+                open-tunnels() => { root.sidebar-open-tunnels(); }
                 system-info-available: root.system-info-available;
                 proc-available: root.proc-available;
                 app-version: root.app-version;
@@ -2062,6 +2074,7 @@ export component AppWindow inherits Window {
                         sftp-sort-dir: term.sftp-sort-dir;
                         sftp-available: term.sftp-available;
                         tunnels: term.tunnels;
+                        open-tunnels-seq: root.open-tunnels-seq;
                         quick-commands: root.quick-commands;
                         quick-sidebar-enabled: root.quick-commands-as-sidebar;
                         quick-panel-docked: root.quick-panel-open;
@@ -2172,6 +2185,7 @@ export component AppWindow inherits Window {
                         sftp-move-files(path) => { root.sftp-move-files(term.id, path); }
                         sftp-paste-files() => { root.sftp-paste-files(term.id); }
                         sftp-zip-files(path) => { root.sftp-zip-files(term.id, path); }
+                        sftp-extract-file(path) => { root.sftp-extract-file(term.id, path); }
                         sftp-cd-terminal(path) => { root.sftp-cd-terminal(term.id, path); }
                         sftp-new-folder(dir) => {
                             root.sftp-prompt-kind = "mkdir";
@@ -2402,6 +2416,11 @@ export component AppWindow inherits Window {
                     net-selected: root.net-selected;
                     net-show-selector: root.net-show-selector;
                     disks: root.disks;
+                    tunnels: root.sidebar-tunnels;
+                    tunnels-available: root.sidebar-tunnels-available;
+                    tunnel-start(id) => { root.sidebar-tunnel-start(id); }
+                    tunnel-stop(id) => { root.sidebar-tunnel-stop(id); }
+                    open-tunnels() => { root.sidebar-open-tunnels(); }
                     system-info-available: root.system-info-available;
                     proc-available: root.proc-available;
                     app-version: root.app-version;

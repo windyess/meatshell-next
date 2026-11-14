@@ -21,6 +21,24 @@ pub(super) fn sync_sessions_for_window(
     }
 }
 
+/// Non-empty port text that is not 1–65535. Blank is allowed and means the
+/// protocol default. Serial sessions do not use this field.
+fn dialog_port_error(draft: &SessionDraft) -> Option<String> {
+    if draft.kind == "serial" {
+        return None;
+    }
+    match parse_dialog_port(draft.port.as_str()) {
+        DialogPort::Invalid => Some(
+            t(
+                "端口需要是 1 到 65535 的数字",
+                "Port must be a number from 1 to 65535",
+            )
+            .to_string(),
+        ),
+        DialogPort::Default | DialogPort::Value(_) => None,
+    }
+}
+
 /// Parse the batch-import textarea (#150). Each non-empty, non-`#` line is
 /// `host|port|user|password|name`; trailing fields are optional (port → 22,
 /// user → root, password → none, name → user@host). A leading header row such as
@@ -797,6 +815,12 @@ pub(super) fn wire_session_callbacks(
             if let Some(w) = weak.upgrade() {
                 session_editor::stop_test(&w, window_id, &active_test);
             }
+            if let Some(message) = dialog_port_error(&draft) {
+                if let Some(w) = weak.upgrade() {
+                    w.set_dialog_test_status(message.into());
+                }
+                return;
+            }
             let id = draft.id.to_string();
             let forwards = match validated_port_forwards(&edit_forwards.borrow()) {
                 Ok(forwards) => forwards,
@@ -859,6 +883,12 @@ pub(super) fn wire_session_callbacks(
         window.on_session_dialog_test(move |draft: SessionDraft| {
             if let Some(w) = weak.upgrade() {
                 session_editor::stop_test(&w, window_id, &active_test);
+            }
+            if let Some(message) = dialog_port_error(&draft) {
+                if let Some(w) = weak.upgrade() {
+                    w.set_dialog_test_status(message.into());
+                }
+                return;
             }
             let snapshot = weak.upgrade().map(|w| session_editor::connection_snapshot(&w)).unwrap_or_default();
             let ticket = active_test.borrow_mut().begin(snapshot);
@@ -1298,7 +1328,7 @@ pub(super) fn wire_session_callbacks(
             terminals_model.push(TerminalState {
                 id: tab_id.clone().into(),
                 status: t("连接中...", "Connecting...").into(),
-                spans: ModelRc::from(std::rc::Rc::new(VecModel::<TermSpan>::default())),
+                spans: ModelRc::from(std::rc::Rc::new(VecModel::<TermLine>::default())),
                 cursor_row: 0,
                 cursor_col: 0,
                 rows_used: 0,
@@ -1324,8 +1354,8 @@ pub(super) fn wire_session_callbacks(
                     VecModel::<SftpTreeNode>::default(),
                 )),
                 sftp_selected_count: 0,
-                sftp_sort_key: "".into(),
-                sftp_sort_dir: 0,
+                sftp_sort_key: "modified".into(),
+                sftp_sort_dir: -1,
                 sftp_available: has_sftp,
                 font_size: 0,
                 tunnels: ModelRc::from(std::rc::Rc::new(VecModel::<TunnelInfo>::default())),

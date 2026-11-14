@@ -117,6 +117,10 @@ export component LabeledInput inherits VerticalLayout {
     in property <brush> idle-border: Theme.border-subtle;
     callback accepted();   // Enter pressed in the field
     callback canceled();   // Esc pressed in the field (#140-3)
+    // Fired with the text actually stored in the field. Parents that sit inside
+    // an `if` cannot rely on `value <=>` alone: a click on Save can read the
+    // outer property before that binding has published the latest keystroke.
+    callback edited(string);
     spacing: 4px;
     property <bool> focus-pending: false;
     public function focus-input() { input.focus(); }
@@ -190,6 +194,10 @@ export component LabeledInput inherits VerticalLayout {
                     } else if pos.x + self.scroll-x > parent.width - self.text-cursor-width {
                         self.scroll-x = parent.width - pos.x - self.text-cursor-width;
                     }
+                }
+                edited => {
+                    root.value = self.text;
+                    root.edited(self.text);
                 }
                 accepted => { root.accepted(); }
                 key-pressed(e) => {

@@ -229,38 +229,138 @@ pub(super) fn apply_terminal_resize(
     }
 }
 
+thread_local! {
+    static TERM_SPAN_CACHES: std::cell::RefCell<
+        HashMap<String, Vec<Option<(u64, Vec<TermSpan>)>>>,
+    > = std::cell::RefCell::new(HashMap::new());
+}
+
 /// Recompute spans + cursor + find/selection highlights for one tab from its
 /// current vt100 screen (respecting scrollback) and push them to the model.
 /// Used by scroll + selection callbacks (Output has its own equivalent inline).
 pub(super) fn rebuild_tab_display(win: &AppWindow, bufs: &TermBuffers, tab_id: &str) {
-    let data = with_term_buf(bufs, tab_id, |buf| {
-        let cols = buf.parser.screen().size().1;
-        let b = buf.render(); // also refreshes buf.displayed_text
-        let matches = compute_find_matches(&buf.displayed_text, &buf.find_query);
-        let sel = buf.selection_rects_visible(cols);
-        (b, matches, sel)
+    let data = TERM_SPAN_CACHES.with(|caches| {
+        let mut caches = caches.borrow_mut();
+        let cache = caches.entry(tab_id.to_string()).or_default();
+        with_term_buf(bufs, tab_id, |buf| {
+            let cols = buf.parser.screen().size().1;
+            let b = buf.render_cached(cache);
+            // Closed find bar: skip the full-screen scan. An empty model is left
+            // in place unless a previous query still has highlights to clear.
+            let matches = if buf.find_query.is_empty() {
+                None
+            } else {
+                Some(compute_find_matches(&buf.displayed_text, &buf.find_query))
+            };
+            let sel = buf.selection_rects_visible(cols);
+            (b, matches, sel)
+        })
     });
     let Some((b, matches, sel)) = data else {
         return;
     };
-    let spans = ModelRc::from(Rc::new(VecModel::from(b.spans)));
-    let fm = ModelRc::from(Rc::new(VecModel::from(matches)));
-    let sm = ModelRc::from(Rc::new(VecModel::from(sel)));
+    let lines = b.lines;
+    let line_keys = b.line_keys;
+    let spans_model = patch_term_lines(win, tab_id, lines, &line_keys);
+    let sel_empty = sel.is_empty();
+    let sm = if sel_empty {
+        None
+    } else {
+        Some(ModelRc::from(Rc::new(VecModel::from(sel))))
+    };
+    let fm = matches.map(|matches| ModelRc::from(Rc::new(VecModel::from(matches))));
     let (cr, cc, ru, alt) = (b.cursor_row, b.cursor_col, b.rows_used, b.is_alt);
+    let mouse_tracked = b.mouse_tracked;
     let (smax, soff) = (b.scroll_max, b.scroll_offset);
     set_terminal_row(win, tab_id, move |row| {
-        row.spans = spans.clone();
+        row.spans = spans_model.clone();
         row.cursor_row = cr;
         row.cursor_col = cc;
         row.rows_used = ru;
         row.is_alt_screen = alt;
-        row.mouse_tracked = b.mouse_tracked;
-        row.find_matches = fm.clone();
-        row.selection = sm.clone();
+        row.mouse_tracked = mouse_tracked;
+        if let Some(fm) = fm.clone() {
+            row.find_matches = fm;
+        } else if row.find_matches.row_count() > 0 {
+            row.find_matches = ModelRc::from(Rc::new(VecModel::<TermMatch>::default()));
+        }
+        if let Some(sm) = sm.clone() {
+            row.selection = sm;
+        } else if row.selection.row_count() > 0 {
+            row.selection = ModelRc::from(Rc::new(VecModel::<TermMatch>::default()));
+        }
         row.scroll_max = smax;
         row.scroll_offset = soff;
     });
     win.window().request_redraw();
+}
+
+fn term_line_keys() -> &'static std::sync::Mutex<HashMap<String, Vec<u64>>> {
+    static KEYS: std::sync::OnceLock<std::sync::Mutex<HashMap<String, Vec<u64>>>> =
+        std::sync::OnceLock::new();
+    KEYS.get_or_init(|| std::sync::Mutex::new(HashMap::new()))
+}
+
+/// Keep the existing row model and replace only lines whose fingerprint changed.
+fn patch_term_lines(
+    win: &AppWindow,
+    tab_id: &str,
+    lines: Vec<Vec<TermSpan>>,
+    keys: &[u64],
+) -> ModelRc<TermLine> {
+    let existing = current_term_lines(win, tab_id);
+    let mut stored = term_line_keys().lock().unwrap();
+    let prev = stored.entry(tab_id.to_string()).or_default();
+    let Some(model) = existing.as_any().downcast_ref::<VecModel<TermLine>>() else {
+        *prev = keys.to_vec();
+        return ModelRc::from(Rc::new(VecModel::from(term_lines(lines))));
+    };
+    if prev.len() != model.row_count() {
+        prev.clear();
+    }
+    while model.row_count() > lines.len() {
+        model.remove(model.row_count() - 1);
+    }
+    for (i, spans) in lines.into_iter().enumerate() {
+        let unchanged = i < model.row_count() && prev.get(i).copied() == keys.get(i).copied();
+        if unchanged {
+            continue;
+        }
+        let line = TermLine {
+            spans: ModelRc::from(Rc::new(VecModel::from(spans))),
+        };
+        if i < model.row_count() {
+            model.set_row_data(i, line);
+        } else {
+            model.push(line);
+        }
+    }
+    prev.clear();
+    prev.extend_from_slice(keys);
+    existing.clone()
+}
+
+fn current_term_lines(win: &AppWindow, tab_id: &str) -> ModelRc<TermLine> {
+    let terminals = win.get_terminals();
+    if let Some(model) = terminals.as_any().downcast_ref::<VecModel<TerminalState>>() {
+        for i in 0..model.row_count() {
+            if let Some(row) = model.row_data(i) {
+                if row.id.as_str() == tab_id {
+                    return row.spans;
+                }
+            }
+        }
+    }
+    ModelRc::from(Rc::new(VecModel::<TermLine>::default()))
+}
+
+fn term_lines(lines: Vec<Vec<TermSpan>>) -> Vec<TermLine> {
+    lines
+        .into_iter()
+        .map(|spans| TermLine {
+            spans: ModelRc::from(Rc::new(VecModel::from(spans))),
+        })
+        .collect()
 }
 
 /// Refresh only the lightweight selection overlay. Dragging used to call

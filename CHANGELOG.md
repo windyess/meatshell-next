@@ -5,6 +5,26 @@ All notable changes are documented here. 本文件记录所有重要变更。
 
 ## Unreleased
 
+## [0.7.17] - 2026-11-14
+
+- **SFTP 列表默认按修改时间从新到旧，并在后台整理。** 文件大小、时间、图标和排序不再占住界面线程；最新的文件出现在第一行。
+- **SFTP list defaults to newest modification time first, prepared off the UI thread.** Size, time, icon and sort no longer block the interface; the newest file is the first row.
+
+- **终端刷新只更新变化的行。** 搜索框关闭时不再扫描查找结果。
+- **Terminal redraws only changed rows.** Find matches are not rescanned while search is closed.
+
+- **运行状态侧栏可查看并启停端口转发。** 规则状态实时显示；转发区域高度减半。表单用中文说明本地、动态、远程三种转发。
+- **Status sidebar lists port forwards and can start or stop them.** Rule status updates live, and the forwarding block is half as tall. The form explains local, dynamic and remote modes in Chinese.
+
+- **保存会话时端口修改会生效。** 焦点还在端口框里点保存也会写入新端口；全角数字和首尾空格按数字解析，无效端口会提示而不是悄悄变回 22。
+- **Editing a saved session's port now sticks.** Saving while the port field still has focus writes the new port; fullwidth digits and surrounding spaces are accepted, and an invalid port is reported instead of silently becoming 22.
+
+- **连接列表更好扫读。** 窄侧栏名称独占一行并可换行；宽列表名称与地址同一行垂直居中，字号略小。
+- **Session list is easier to scan.** In a narrow sidebar the name wraps on its own line; in a wide list the name and address share one vertically centered row, at a slightly smaller size.
+
+- **SFTP 右键可解压到当前目录。** 支持 zip、tar.gz、tgz、tar、7z、rar、gz、bz2、xz，解压后刷新列表。
+- **SFTP context menu can extract into the current directory.** zip, tar.gz, tgz, tar, 7z, rar, gz, bz2 and xz are supported, and the list refreshes afterwards.
+
 ## [0.7.16] - 2026-10-29
 
 - **优化弱网下 SFTP 浏览。** 树与文件列表共用目录缓存，避免重复 `read_dir`；过期的 ListDir 结果丢弃；刷新只重列当前目录；owner `getent` 移出导航关键路径；切换目录立即显示 loading 遮罩。

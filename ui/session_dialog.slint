@@ -35,7 +35,9 @@ export struct SessionDraft {
     name: string,
     kind: string,      // "ssh" | "serial" | "telnet" | "rdp"
     host: string,
-    port: int,
+    // Kept as text so a trailing space or fullwidth digit is not turned into 0
+    // (and then silently replaced by the protocol default) at save time.
+    port: string,
     user: string,
     auth: string,      // "password" | "key"
     password: string,
@@ -791,7 +793,7 @@ export component SessionDialog inherits ModalLayer {
             name: root.draft-name,
             kind: root.draft-kind,
             host: root.draft-host,
-            port: root.draft-port.to-float(),
+            port: root.draft-port,
             user: root.draft-user,
             auth: root.draft-auth,
             password: root.draft-password,
@@ -1036,6 +1038,7 @@ export component SessionDialog inherits ModalLayer {
                     placeholder: root.draft-kind == "telnet" ? "23"
                         : root.draft-kind == "rdp" ? "3389" : "22";
                     value <=> root.draft-port;
+                    edited(v) => { root.draft-port = v; }
                     horizontal-stretch: 1;
                 }
             }
@@ -1683,7 +1686,7 @@ export component SessionDialog inherits ModalLayer {
                             name: root.draft-name,
                             kind: root.draft-kind,
                             host: root.draft-host,
-                            port: root.draft-port.to-float(),
+                            port: root.draft-port,
                             user: root.draft-user,
                             auth: root.draft-auth,
                             password: root.draft-password,

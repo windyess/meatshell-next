@@ -258,6 +258,9 @@ msgstr "Paste here"
 msgid "Compress as ZIP"
 msgstr "Compress as ZIP"
 
+msgid "Extract here"
+msgstr "Extract here"
+
 msgid "Copy to session..."
 msgstr "Copy to session..."
 
@@ -729,3 +732,51 @@ msgstr "Save session"
 
 msgid "Create session"
 msgstr "Create session"
+
+msgid "Port forwarding"
+msgstr "Port forwarding"
+
+msgid "SSH session required"
+msgstr "SSH session required"
+
+msgid "No forwarding rules"
+msgstr "No forwarding rules"
+
+msgid "Local listen address"
+msgstr "Local listen address"
+
+msgid "Server listen address"
+msgstr "Server listen address"
+
+msgid "Server target host"
+msgstr "Server target host"
+
+msgid "Local target host"
+msgstr "Local target host"
+
+msgid "Save to this SSH session"
+msgstr "Save to this SSH session"
+
+msgid "Start automatically when connecting"
+msgstr "Start automatically when connecting"
+
+msgid "No tunnels"
+msgstr "No tunnels"
+
+msgid "Start"
+msgstr "Start"
+
+msgid "Stop"
+msgstr "Stop"
+
+msgid "Local forward (-L) opens a port on this computer. When you connect to the listen address and port, the SSH server connects to the target host and port. Listen address 127.0.0.1 means only this computer can connect. A target of 127.0.0.1 is the server itself; an internal IP is a machine the server can reach. Example: this computer's 8080 → the server connects to 127.0.0.1:80, so http://127.0.0.1:8080 shows that site."
+msgstr "Local forward (-L) opens a port on this computer. When you connect to the listen address and port, the SSH server connects to the target host and port. Listen address 127.0.0.1 means only this computer can connect. A target of 127.0.0.1 is the server itself; an internal IP is a machine the server can reach. Example: this computer's 8080 → the server connects to 127.0.0.1:80, so http://127.0.0.1:8080 shows that site."
+
+msgid "Dynamic forward (-D) opens a SOCKS5 proxy on this computer. Point a browser or app at the listen address and port, and the SSH server makes the connections for you. No target host is needed. Example: listen on 127.0.0.1:1080, then set the app proxy to that address."
+msgstr "Dynamic forward (-D) opens a SOCKS5 proxy on this computer. Point a browser or app at the listen address and port, and the SSH server makes the connections for you. No target host is needed. Example: listen on 127.0.0.1:1080, then set the app proxy to that address."
+
+msgid "Remote forward (-R) opens a port on the SSH server. Anyone who connects to that port is sent to the target host and port on this computer. Listen address 127.0.0.1 means only the server itself can connect; 0.0.0.0 lets other machines reach it. Example: server port 9000 → this computer's 127.0.0.1:3000."
+msgstr "Remote forward (-R) opens a port on the SSH server. Anyone who connects to that port is sent to the target host and port on this computer. Listen address 127.0.0.1 means only the server itself can connect; 0.0.0.0 lets other machines reach it. Example: server port 9000 → this computer's 127.0.0.1:3000."
+
+msgid "Saved rules stay with this session. Turn on auto-start to begin forwarding the next time you connect."
+msgstr "Saved rules stay with this session. Turn on auto-start to begin forwarding the next time you connect."

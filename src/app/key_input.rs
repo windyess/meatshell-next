@@ -974,7 +974,7 @@ pub(super) fn wire_key_input(
             }
             if let Some(win) = weak.upgrade() {
                 set_terminal_row(&win, &tid, |row| {
-                    row.spans = ModelRc::from(Rc::new(VecModel::<TermSpan>::default()));
+                    row.spans = ModelRc::from(Rc::new(VecModel::<TermLine>::default()));
                     row.find_matches = ModelRc::from(Rc::new(VecModel::<TermMatch>::default()));
                     row.selection = ModelRc::from(Rc::new(VecModel::<TermMatch>::default()));
                     row.cursor_row = 0;

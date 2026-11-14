@@ -106,63 +106,158 @@ pub(super) fn sorted_sftp_entries_from_model(
     ModelRc::from(std::rc::Rc::new(VecModel::from(entries)))
 }
 
+/// Default file list: modification time, newest on the first row.
+pub(super) const SFTP_DEFAULT_SORT_KEY: &str = "modified";
+pub(super) const SFTP_DEFAULT_SORT_DIR: i32 = -1;
+
 pub(super) fn sort_sftp_entries(entries: &mut [SftpEntry], key: &str, dir: i32) {
     use std::cmp::Ordering;
 
-    let name_cmp = |a: &SftpEntry, b: &SftpEntry| natural_name_cmp(&a.name, &b.name);
-    let default_cmp = |a: &SftpEntry, b: &SftpEntry| match (a.is_dir, b.is_dir) {
-        (true, false) => Ordering::Less,
-        (false, true) => Ordering::Greater,
-        _ => name_cmp(a, b),
+    let (key, dir) = if dir == 0 || key.is_empty() {
+        (SFTP_DEFAULT_SORT_KEY, SFTP_DEFAULT_SORT_DIR)
+    } else {
+        (key, dir)
     };
-
-    if dir == 0 || key.is_empty() {
-        entries.sort_by(default_cmp);
-        return;
-    }
-
-    entries.sort_by(|a, b| {
-        let group = match (a.is_dir, b.is_dir) {
-            (true, false) => Ordering::Less,
-            (false, true) => Ordering::Greater,
-            _ => Ordering::Equal,
+    // Lowercase once. The comparator used to allocate two strings per comparison.
+    let names: Vec<String> = entries.iter().map(|e| e.name.to_lowercase()).collect();
+    let mut order: Vec<usize> = (0..entries.len()).collect();
+    order.sort_by(|&ia, &ib| {
+        let a = &entries[ia];
+        let b = &entries[ib];
+        // Time order mixes files and folders so the newest item is row 0.
+        // Other columns still keep directories together.
+        let group = if key == "modified" {
+            Ordering::Equal
+        } else {
+            match (a.is_dir, b.is_dir) {
+                (true, false) => Ordering::Less,
+                (false, true) => Ordering::Greater,
+                _ => Ordering::Equal,
+            }
         };
         if group != Ordering::Equal {
             return group;
         }
+        let name_ord = natural_ascii_cmp(&names[ia], &names[ib]).then_with(|| a.name.cmp(&b.name));
         let ord = match key {
             "size" => a
                 .size_bytes
                 .partial_cmp(&b.size_bytes)
                 .unwrap_or(Ordering::Equal)
-                .then_with(|| default_cmp(a, b)),
-            "modified" => a
-                .modified_ts
-                .partial_cmp(&b.modified_ts)
-                .unwrap_or(Ordering::Equal)
-                .then_with(|| default_cmp(a, b)),
+                .then_with(|| name_ord),
+            "modified" => a.modified_ts.cmp(&b.modified_ts).then_with(|| name_ord),
             "permissions" => a
                 .permissions_mode
                 .cmp(&b.permissions_mode)
-                .then_with(|| default_cmp(a, b)),
-            "owner" => a.owner.cmp(&b.owner).then_with(|| default_cmp(a, b)),
-            "group" => a.group.cmp(&b.group).then_with(|| default_cmp(a, b)),
-            "type" => a
-                .file_type
-                .cmp(&b.file_type)
-                .then_with(|| default_cmp(a, b)),
-            _ => name_cmp(a, b).then_with(|| default_cmp(a, b)),
+                .then_with(|| name_ord),
+            "owner" => a.owner.cmp(&b.owner).then_with(|| name_ord),
+            "group" => a.group.cmp(&b.group).then_with(|| name_ord),
+            "type" => a.file_type.cmp(&b.file_type).then_with(|| name_ord),
+            _ => name_ord,
         };
-        if dir < 0 {
-            ord.reverse()
-        } else {
-            ord
-        }
+        if dir < 0 { ord.reverse() } else { ord }
+    });
+    let sorted: Vec<SftpEntry> = order.iter().map(|&i| entries[i].clone()).collect();
+    entries.clone_from_slice(&sorted);
+}
+
+/// Format and sort a remote listing. Safe to call off the UI thread.
+pub(super) fn sftp_entries_from_remote(entries: &[crate::ssh::RemoteEntry]) -> Vec<SftpEntry> {
+    entries
+        .iter()
+        .map(|e| {
+            let icon_kind = sftp_entry_icon_kind(&e.name, e.is_dir, &e.file_type, e.mode);
+            SftpEntry {
+                name: e.name.clone().into(),
+                full_path: e.full_path.clone().into(),
+                is_dir: e.is_dir,
+                is_link: e.file_type == "symlink",
+                size: if e.is_dir {
+                    "".into()
+                } else {
+                    format_size(e.size).into()
+                },
+                size_bytes: e.size as f32,
+                modified: format_mtime(e.modified).into(),
+                modified_ts: e.modified as i32,
+                mode: (e.mode & 0o7777) as i32,
+                file_type: match e.file_type.as_str() {
+                    "directory" => crate::i18n::t("文件夹", "Folder"),
+                    "symlink" => crate::i18n::t("符号链接", "Symbolic link"),
+                    "socket" => crate::i18n::t("套接字", "Socket"),
+                    "block-device" => crate::i18n::t("块设备", "Block device"),
+                    "character-device" => crate::i18n::t("字符设备", "Character device"),
+                    "fifo" => crate::i18n::t("管道", "FIFO"),
+                    _ => crate::i18n::t("文件", "File"),
+                }
+                .into(),
+                permissions: crate::ssh::format_permissions(e.permissions_mode).into(),
+                permissions_mode: e.permissions_mode as i32,
+                owner: e.owner.clone().unwrap_or_default().into(),
+                group: e.group.clone().unwrap_or_default().into(),
+                selected: false,
+                icon_kind,
+            }
+        })
+        .collect()
+}
+
+fn sftp_listing_tickets() -> &'static std::sync::Mutex<HashMap<String, u64>> {
+    static TICKETS: std::sync::OnceLock<std::sync::Mutex<HashMap<String, u64>>> =
+        std::sync::OnceLock::new();
+    TICKETS.get_or_init(|| std::sync::Mutex::new(HashMap::new()))
+}
+
+/// Build the file list off the UI thread, then install it if this request is
+/// still the newest one for the tab.
+pub(super) fn schedule_sftp_listing(
+    win: &AppWindow,
+    tab_id: &str,
+    path: String,
+    entries: Vec<crate::ssh::RemoteEntry>,
+    sort_key: String,
+    sort_dir: i32,
+) {
+    let ticket = {
+        let mut tickets = sftp_listing_tickets().lock().unwrap();
+        let next = tickets.entry(tab_id.to_string()).or_insert(0);
+        *next = next.wrapping_add(1);
+        *next
+    };
+    let weak = win.as_weak();
+    let tab = tab_id.to_string();
+    std::thread::spawn(move || {
+        let mut slint_entries = sftp_entries_from_remote(&entries);
+        sort_sftp_entries(&mut slint_entries, &sort_key, sort_dir);
+        let _ = slint::invoke_from_event_loop(move || {
+            let current = sftp_listing_tickets()
+                .lock()
+                .unwrap()
+                .get(&tab)
+                .copied();
+            if current != Some(ticket) {
+                return;
+            }
+            let Some(win) = weak.upgrade() else { return };
+            install_sftp_listing(&win, &tab, &path, slint_entries);
+        });
     });
 }
 
-pub(super) fn natural_name_cmp(a: &str, b: &str) -> std::cmp::Ordering {
-    natural_ascii_cmp(&a.to_lowercase(), &b.to_lowercase()).then_with(|| a.cmp(b))
+pub(super) fn install_sftp_listing(
+    win: &AppWindow,
+    tab_id: &str,
+    path: &str,
+    entries: Vec<SftpEntry>,
+) {
+    let model = ModelRc::from(std::rc::Rc::new(VecModel::from(entries)));
+    let path: SharedString = path.into();
+    set_terminal_row(win, tab_id, move |t| {
+        t.sftp_path = path.clone();
+        t.sftp_entries = model.clone();
+        t.sftp_loading = false;
+        t.sftp_selected_count = 0;
+    });
 }
 
 pub(super) fn natural_ascii_cmp(a: &str, b: &str) -> std::cmp::Ordering {
@@ -546,6 +641,57 @@ while [ -e \"$out\" ]; do n=$((n+1)); out=\"$base-$n.zip\"; done && zip -rq \"$o
     Some(cmd)
 }
 
+/// Remote extract command for one archive in the current directory.
+/// The tool is chosen from the filename. Disk images return `None`.
+pub(super) fn build_remote_extract_command(path: &str, dest_dir: &str) -> Option<String> {
+    let dest = dest_dir.trim_end_matches('/');
+    let dest = if dest.is_empty() { "/" } else { dest };
+    if path.is_empty() || parent_path(path) != dest {
+        return None;
+    }
+    let name = file_name(path);
+    if name == "." || name == ".." {
+        return None;
+    }
+    let tool = extract_tool(name)?;
+    Some(format!(
+        "cd -- {} && {tool} {}",
+        posix_shell_quote(dest),
+        posix_shell_quote(name)
+    ))
+}
+
+fn extract_tool(name: &str) -> Option<&'static str> {
+    let lower = name.to_ascii_lowercase();
+    if lower.ends_with(".tar.gz") || lower.ends_with(".tgz") {
+        Some("tar -xzf")
+    } else if lower.ends_with(".tar.bz2") || lower.ends_with(".tbz2") {
+        Some("tar -xjf")
+    } else if lower.ends_with(".tar.xz") || lower.ends_with(".txz") {
+        Some("tar -xJf")
+    } else if lower.ends_with(".tar.zst") || lower.ends_with(".tzst") {
+        Some("tar --zstd -xf")
+    } else if lower.ends_with(".tar") {
+        Some("tar -xf")
+    } else if lower.ends_with(".zip") {
+        Some("unzip -o")
+    } else if lower.ends_with(".7z") {
+        Some("7z x -y")
+    } else if lower.ends_with(".rar") {
+        Some("unrar x -o+")
+    } else if lower.ends_with(".gz") {
+        Some("gzip -dk")
+    } else if lower.ends_with(".bz2") {
+        Some("bzip2 -dk")
+    } else if lower.ends_with(".xz") {
+        Some("xz -dk")
+    } else if lower.ends_with(".zst") {
+        Some("zstd -d -k")
+    } else {
+        None
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -681,5 +827,19 @@ while [ -e \"$out\" ]; do n=$((n+1)); out=\"$base-$n.zip\"; done && zip -rq \"$o
     fn zip_empty_when_no_local_sources() {
         assert!(build_remote_zip_command(&["/opt/a".into()], "/tmp").is_none());
         assert!(build_remote_zip_command(&[], "/tmp").is_none());
+    }
+
+    #[test]
+    fn extracts_common_archives_in_the_current_directory() {
+        assert_eq!(
+            build_remote_extract_command("/home/gtgpu/redis-6.2.12.tar.gz", "/home/gtgpu").unwrap(),
+            "cd -- '/home/gtgpu' && tar -xzf 'redis-6.2.12.tar.gz'"
+        );
+        assert_eq!(
+            build_remote_extract_command("/home/gtgpu/redis-6.2.12.zip", "/home/gtgpu").unwrap(),
+            "cd -- '/home/gtgpu' && unzip -o 'redis-6.2.12.zip'"
+        );
+        assert!(build_remote_extract_command("/home/gtgpu/disk.iso", "/home/gtgpu").is_none());
+        assert!(build_remote_extract_command("/opt/a.tar.gz", "/home/gtgpu").is_none());
     }
 }

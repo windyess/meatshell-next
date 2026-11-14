@@ -93,6 +93,35 @@ pub(super) fn wire_tunnel_callbacks(
             }
         });
     }
+    {
+        let weak = window.as_weak();
+        let handles = handles.clone();
+        window.on_sidebar_tunnel_start(move |id| {
+            let Some(win) = weak.upgrade() else { return };
+            let tab = win.get_active_tab_id();
+            if let Some(handle) = handles.borrow().get(tab.as_str()) {
+                handle.start_tunnel(id.to_string());
+            }
+        });
+    }
+    {
+        let weak = window.as_weak();
+        let handles = handles.clone();
+        window.on_sidebar_tunnel_stop(move |id| {
+            let Some(win) = weak.upgrade() else { return };
+            let tab = win.get_active_tab_id();
+            if let Some(handle) = handles.borrow().get(tab.as_str()) {
+                handle.stop_tunnel(id.to_string());
+            }
+        });
+    }
+    {
+        let weak = window.as_weak();
+        window.on_sidebar_open_tunnels(move || {
+            let Some(win) = weak.upgrade() else { return };
+            win.set_open_tunnels_seq(win.get_open_tunnels_seq().wrapping_add(1));
+        });
+    }
     window.on_tunnel_delete(move |tab_id, id| {
         if !handles.borrow().contains_key(tab_id.as_str()) {
             return;
