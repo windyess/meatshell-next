@@ -14,6 +14,7 @@ use russh::Channel;
 use tokio::io::{copy_bidirectional, AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 
 use crate::ssh::{ClientHandler, SessionEvent};
@@ -58,8 +59,31 @@ async fn open_direct(
         .await
 }
 
+/// Bind a listen socket, retrying a few times when the previous listener has
+/// not finished closing. A genuine conflict still fails after the retries.
+async fn bind_listener(addr: &str) -> std::io::Result<TcpListener> {
+    const ATTEMPTS: u32 = 8;
+    let mut last = None;
+    for attempt in 0..ATTEMPTS {
+        match TcpListener::bind(addr).await {
+            Ok(listener) => return Ok(listener),
+            Err(err) if is_addr_in_use(&err) && attempt + 1 < ATTEMPTS => {
+                last = Some(err);
+                tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+            }
+            Err(err) => return Err(err),
+        }
+    }
+    Err(last.expect("in-use retries record the last error"))
+}
+
+fn is_addr_in_use(err: &std::io::Error) -> bool {
+    err.kind() == std::io::ErrorKind::AddrInUse || err.raw_os_error() == Some(10048)
+}
+
 /// Local forward (-L): listen locally and tunnel each connection to
 /// `target_host:target_port` reached from the SSH server's side.
+/// The receiver reports whether the listen socket opened.
 pub fn spawn_local(
     handle: Arc<tokio::sync::Mutex<Handle<ClientHandler>>>,
     bind_addr: String,
@@ -67,16 +91,18 @@ pub fn spawn_local(
     target_host: String,
     target_port: u16,
     events: UnboundedSender<SessionEvent>,
-) -> JoinHandle<()> {
+) -> (JoinHandle<()>, oneshot::Receiver<Result<(), String>>) {
     let bind = bind_target(&bind_addr, bind_port);
-    tokio::spawn(async move {
-        let listener = match TcpListener::bind(&bind).await {
+    let (tx, rx) = oneshot::channel();
+    let task = tokio::spawn(async move {
+        let listener = match bind_listener(&bind).await {
             Ok(l) => l,
             Err(e) => {
-                notice(&events, format!("-L {bind} 监听失败 / bind failed: {e}"));
+                let _ = tx.send(Err(e.to_string()));
                 return;
             }
         };
+        let _ = tx.send(Ok(()));
         notice(&events, format!("-L {bind} → {target_host}:{target_port}"));
         loop {
             let (mut inbound, peer) = match listener.accept().await {
@@ -99,7 +125,8 @@ pub fn spawn_local(
                 }
             });
         }
-    })
+    });
+    (task, rx)
 }
 
 /// Dynamic forward (-D): a minimal SOCKS5 proxy. Each accepted connection
@@ -110,16 +137,18 @@ pub fn spawn_dynamic(
     bind_addr: String,
     bind_port: u16,
     events: UnboundedSender<SessionEvent>,
-) -> JoinHandle<()> {
+) -> (JoinHandle<()>, oneshot::Receiver<Result<(), String>>) {
     let bind = bind_target(&bind_addr, bind_port);
-    tokio::spawn(async move {
-        let listener = match TcpListener::bind(&bind).await {
+    let (tx, rx) = oneshot::channel();
+    let task = tokio::spawn(async move {
+        let listener = match bind_listener(&bind).await {
             Ok(l) => l,
             Err(e) => {
-                notice(&events, format!("-D {bind} 监听失败 / bind failed: {e}"));
+                let _ = tx.send(Err(e.to_string()));
                 return;
             }
         };
+        let _ = tx.send(Ok(()));
         notice(&events, format!("-D {bind} (SOCKS5)"));
         loop {
             let (inbound, peer) = match listener.accept().await {
@@ -135,7 +164,8 @@ pub fn spawn_dynamic(
                 }
             });
         }
-    })
+    });
+    (task, rx)
 }
 
 /// Handle one SOCKS5 client connection end-to-end.

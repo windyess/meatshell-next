@@ -81,7 +81,10 @@ pub(super) fn parse_batch_import(text: &str) -> Vec<Session> {
 /// dropdown (#179). Ungrouped ("") is excluded; the dialog leaves the field blank
 /// for that case.
 pub(super) fn session_groups_model(store: &ConfigStore) -> ModelRc<SharedString> {
-    let named = named_display_groups(store.groups(), store.sessions());
+    let named = apply_group_order(
+        named_display_groups(store.groups(), store.sessions()),
+        store.session_group_order(),
+    );
     ModelRc::from(Rc::new(VecModel::from(
         named
             .into_iter()
@@ -174,10 +177,11 @@ fn build_session_rows(
     collapsed_groups: Option<&[String]>,
     builtin_sessions: &[Session],
     query: &str,
+    group_order: Option<&[String]>,
 ) -> Vec<SessionInfo> {
-    // Group sessions by their `group` (named groups alphabetically, ungrouped
-    // last), then by name within each group, and tag the first row of every
-    // group with a header so the welcome list can render a folder heading (#41).
+    // Group sessions by their `group`. Without a saved drag order, ungrouped
+    // comes first and named folders are A→Z. Tag the first row of every group
+    // with a header so the welcome list can render a folder heading (#41).
     let query = normalized_query(query);
     let searching = !query.is_empty();
     let matches = |session: &Session| session_matches_normalized_query(session, &query);
@@ -188,16 +192,20 @@ fn build_session_rows(
                 .unwrap_or(true)
     };
 
-    // Ordered list of display groups:
+    // Ordered list of display groups under the pinned system folder:
     //  - "default" only when there are ungrouped sessions (group == "")
-    //  - named groups: explicit folders (incl. empty ones) ∪ sessions' groups,
-    //    de-duplicated, alphabetical.
+    //  - named groups: explicit folders (incl. empty ones) ∪ sessions' groups
+    // A saved drag order replaces the alphabetical default.
     let has_default = sessions.iter().any(|session| {
         (session.group.is_empty() || is_reserved_session_group(session.group.trim()))
             && matches(session)
     });
-    let mut named: Vec<String> = if searching {
-        sessions
+    let mut candidates: Vec<String> = Vec::new();
+    if has_default {
+        candidates.push("default".to_string());
+    }
+    if searching {
+        let mut matched: Vec<String> = sessions
             .iter()
             .filter(|session| {
                 !session.group.is_empty()
@@ -205,18 +213,14 @@ fn build_session_rows(
                     && matches(session)
             })
             .map(|session| session.group.clone())
-            .collect()
+            .collect();
+        matched.sort_by_key(|group| group.to_lowercase());
+        matched.dedup();
+        candidates.extend(matched);
     } else {
-        named_display_groups(explicit_groups, sessions)
-    };
-    named.sort_by_key(|g| g.to_lowercase());
-    named.dedup();
-
-    let mut display_groups: Vec<String> = Vec::new();
-    if has_default {
-        display_groups.push("default".to_string());
+        candidates.extend(named_display_groups(explicit_groups, sessions));
     }
-    display_groups.extend(named);
+    let display_groups = apply_group_order(candidates, group_order);
 
     // Placeholder row for an empty folder; id == "" marks it as a group header
     // with no session (used by the UI to gate the "delete group" action).
@@ -321,6 +325,7 @@ pub(super) fn sync_sessions_to_model_with_filter(
         store.collapsed_session_groups(),
         &builtin_sessions,
         query,
+        store.session_group_order(),
     ));
 }
 
@@ -343,6 +348,7 @@ pub(super) fn refresh_session_rows_in_place(
         store.collapsed_session_groups(),
         &builtin_sessions,
         query,
+        store.session_group_order(),
     );
     if rows.len() == model.row_count() {
         for (i, row) in rows.into_iter().enumerate() {
@@ -705,7 +711,7 @@ mod search_tests {
         let groups = vec!["empty".to_string(), "prod".to_string()];
         let collapsed = vec!["prod".to_string(), "system".to_string()];
 
-        let rows = build_session_rows(&saved, &groups, Some(&collapsed), &builtins, "prod");
+        let rows = build_session_rows(&saved, &groups, Some(&collapsed), &builtins, "prod", None);
 
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].name.as_str(), "Prod API");
@@ -723,6 +729,7 @@ mod search_tests {
             Some(&["system".to_string()]),
             &builtins,
             "LOCALHOST",
+            None,
         );
 
         assert_eq!(rows.len(), 1);
@@ -737,7 +744,7 @@ mod search_tests {
         let saved = vec![session("1", "Prod API", "10.0.0.8", "prod")];
         let builtins = vec![session("local", "Local terminal", "localhost", "system")];
 
-        let rows = build_session_rows(&saved, &[], None, &builtins, "staging");
+        let rows = build_session_rows(&saved, &[], None, &builtins, "staging", None);
 
         assert!(rows.is_empty());
     }
@@ -748,7 +755,7 @@ mod search_tests {
         let groups = vec!["empty".to_string(), "prod".to_string()];
         let collapsed = vec!["prod".to_string()];
 
-        let rows = build_session_rows(&saved, &groups, Some(&collapsed), &[], "");
+        let rows = build_session_rows(&saved, &groups, Some(&collapsed), &[], "", None);
 
         assert!(rows
             .iter()
@@ -815,7 +822,7 @@ mod serial_display_tests {
             session.data_bits = bits;
             session.parity = parity.into();
             session.stop_bits = stops;
-            let rows = build_session_rows(&[session], &[], None, &[], "");
+            let rows = build_session_rows(&[session], &[], None, &[], "", None);
             assert_eq!(rows.len(), 1);
             assert_eq!(rows[0].serial_detail.as_str(), expected);
         }
@@ -829,7 +836,7 @@ mod serial_display_tests {
             session.host = "example.com".into();
             session.port = 2222;
             session.user = "alice".into();
-            let rows = build_session_rows(&[session], &[], None, &[], "");
+            let rows = build_session_rows(&[session], &[], None, &[], "", None);
             assert!(rows[0].serial_detail.is_empty());
             assert_eq!(rows[0].host.as_str(), "example.com");
             assert_eq!(rows[0].port, 2222);

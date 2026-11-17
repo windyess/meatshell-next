@@ -20,6 +20,7 @@ export struct ProcRow {
     mem: string,       // "4.5"
     command: string,   // truncated args
     cpu-frac: float,   // 0.0..1.0, drives the row load bar
+    mem-frac: float,   // 0.0..1.0, memory bar when sorting by memory
     own-process: bool, // may terminate without root authentication
 }
 
@@ -39,6 +40,32 @@ component ProcMenuItem inherits Rectangle {
         font-size: Theme.fs-sm;
         vertical-alignment: center;
         x: 10px;
+    }
+}
+
+component ProcHeader inherits Rectangle {
+    in property <string> label;
+    in property <bool> active;
+    in property <int> dir;
+    in property <length> col-width: 0px;
+    in property <bool> stretch: false;
+    in property <bool> align-right: false;
+    callback clicked();
+    width: root.stretch ? 0px : root.col-width;
+    horizontal-stretch: root.stretch ? 1 : 0;
+    height: 22px;
+    header-touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+    Text {
+        text: root.label + (root.active ? (root.dir < 0 ? " ↓" : " ↑") : "");
+        color: header-touch.has-hover || root.active ? Theme.accent : Theme.text-muted;
+        font-size: Theme.fs-xs;
+        vertical-alignment: center;
+        horizontal-alignment: root.align-right ? right : left;
+        overflow: elide;
+        width: parent.width;
     }
 }
 
@@ -94,8 +121,13 @@ export component ProcWindow inherits Window {
     in property <bool> is-mac: false;
     in property <bool> custom-titlebar;
     no-frame: root.custom-titlebar;
-    in property <[ProcRow]> proc-list;       // top remote processes by CPU
+    in property <[ProcRow]> proc-list;       // top remote processes by CPU and memory
     in property <string> host;               // "user@host" shown in the titlebar
+    in-out property <string> sort-key: "cpu";
+    in-out property <int> sort-dir: -1;
+    in-out property <bool> paused: false;
+    callback sort-by(string);
+    callback toggle-pause();
 
     in-out property <string> action-status;
     in-out property <bool> action-busy;
@@ -128,10 +160,10 @@ export component ProcWindow inherits Window {
         }
     }
 
-    min-width: 420px;
-    min-height: 280px;
-    preferred-width: 640px;
-    preferred-height: 520px;
+    min-width: 760px;
+    min-height: 360px;
+    preferred-width: 1100px;
+    preferred-height: 640px;
     // Opaque base; the wallpaper Image covers it and the panels frost over the
     // image (mirrors AppWindow) so this window matches the immersive look.
     background: Theme.window-base;
@@ -217,18 +249,73 @@ export component ProcWindow inherits Window {
             padding: 12px;
             spacing: 8px;
 
-            // Column header.
+            HorizontalLayout {
+                spacing: 6px;
+                height: 24px;
+                Rectangle {
+                    width: max(52px, cpu-mode-label.preferred-width + 16px);
+                    height: 22px;
+                    border-radius: Theme.radius-sm;
+                    background: root.sort-key == "cpu" ? Theme.accent : (cpu-mode-ta.has-hover ? Theme.bg-hover : Theme.bg-root);
+                    cpu-mode-ta := TouchArea { mouse-cursor: pointer; clicked => { root.sort-by("cpu"); } }
+                    cpu-mode-label := Text {
+                        text: "CPU";
+                        color: root.sort-key == "cpu" ? #ffffff : Theme.text-primary;
+                        font-size: Theme.fs-xs;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+                Rectangle {
+                    width: max(52px, mem-mode-label.preferred-width + 16px);
+                    height: 22px;
+                    border-radius: Theme.radius-sm;
+                    background: root.sort-key == "mem" ? Theme.accent : (mem-mode-ta.has-hover ? Theme.bg-hover : Theme.bg-root);
+                    mem-mode-ta := TouchArea { mouse-cursor: pointer; clicked => { root.sort-by("mem"); } }
+                    mem-mode-label := Text {
+                        text: @tr("Memory");
+                        color: root.sort-key == "mem" ? #ffffff : Theme.text-primary;
+                        font-size: Theme.fs-xs;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+                Text {
+                    text: root.paused ? @tr("Refresh paused") : @tr("Refreshing every second");
+                    color: Theme.text-muted;
+                    font-size: Theme.fs-xs;
+                    vertical-alignment: center;
+                    horizontal-stretch: 1;
+                    overflow: elide;
+                }
+                Rectangle {
+                    width: pause-label.preferred-width + 16px;
+                    height: 22px;
+                    border-radius: Theme.radius-sm;
+                    border-width: 1px;
+                    border-color: Theme.border-subtle;
+                    background: pause-ta.has-hover ? Theme.bg-hover : transparent;
+                    pause-ta := TouchArea { mouse-cursor: pointer; clicked => { root.toggle-pause(); } }
+                    pause-label := Text {
+                        text: root.paused ? @tr("Resume refresh") : @tr("Pause refresh");
+                        color: Theme.text-primary;
+                        font-size: Theme.fs-xs;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+
+            // Column header. Click a title to sort; click again to flip direction.
             HorizontalLayout {
                 padding-left: 6px;
                 padding-right: 6px;
                 spacing: 6px;
-                Text { text: "PID"; width: 56px; color: Theme.text-muted; font-size: Theme.fs-xs; }
-                Text { text: @tr("User"); width: 84px; color: Theme.text-muted; font-size: Theme.fs-xs; }
-                Text { text: "CPU%"; width: 52px; color: Theme.text-muted; font-size: Theme.fs-xs;
-                       horizontal-alignment: right; }
-                Text { text: "MEM%"; width: 52px; color: Theme.text-muted; font-size: Theme.fs-xs;
-                       horizontal-alignment: right; }
-                Text { text: @tr("Command"); horizontal-stretch: 1; color: Theme.text-muted; font-size: Theme.fs-xs; }
+                ProcHeader { label: "PID"; col-width: 64px; active: root.sort-key == "pid"; dir: root.sort-dir; clicked => { root.sort-by("pid"); } }
+                ProcHeader { label: @tr("User"); col-width: 84px; active: root.sort-key == "user"; dir: root.sort-dir; clicked => { root.sort-by("user"); } }
+                ProcHeader { label: "CPU%"; col-width: 64px; align-right: true; active: root.sort-key == "cpu"; dir: root.sort-dir; clicked => { root.sort-by("cpu"); } }
+                ProcHeader { label: "MEM%"; col-width: 64px; align-right: true; active: root.sort-key == "mem"; dir: root.sort-dir; clicked => { root.sort-by("mem"); } }
+                ProcHeader { label: @tr("Command"); stretch: true; active: root.sort-key == "command"; dir: root.sort-dir; clicked => { root.sort-by("command"); } }
             }
 
             if root.action-status != "" : Text {
@@ -276,12 +363,13 @@ export component ProcWindow inherits Window {
                             }
                         }
 
-                        // CPU load bar behind the row.
+                        // Load bar for the monitor in front: CPU, or memory when that column is active.
                         Rectangle {
                             x: 0; y: 0;
                             height: parent.height;
-                            width: parent.width * clamp(p.cpu-frac, 0.0, 1.0);
-                            background: p.cpu-frac > 0.5 ? Theme.warning.with-alpha(0.28)
+                            width: parent.width * (root.sort-key == "mem" ? clamp(p.mem-frac, 0.0, 1.0) : clamp(p.cpu-frac, 0.0, 1.0));
+                            background: root.sort-key == "mem" ? Theme.success.with-alpha(0.32)
+                                      : p.cpu-frac > 0.5 ? Theme.warning.with-alpha(0.28)
                                       : Theme.accent.with-alpha(0.20);
                         }
                         HorizontalLayout {
@@ -289,7 +377,7 @@ export component ProcWindow inherits Window {
                             padding-right: 6px;
                             spacing: 6px;
                             Rectangle {
-                                width: 56px;
+                                width: 64px;
                                 pid-touch := TouchArea {
                                     mouse-cursor: pointer;
                                     clicked => {
@@ -298,15 +386,15 @@ export component ProcWindow inherits Window {
                                         root.action-error = false;
                                     }
                                 }
-                                Text { text: p.pid; color: pid-touch.has-hover ? Theme.accent : Theme.text-secondary;
-                                       font-size: Theme.fs-xs; vertical-alignment: center; }
+                            Text { text: p.pid; color: pid-touch.has-hover ? Theme.accent : Theme.text-secondary;
+                                   font-size: Theme.fs-xs; vertical-alignment: center; }
                             }
                             Text { text: p.user; width: 84px; color: Theme.text-secondary;
                                    font-size: Theme.fs-xs; vertical-alignment: center; overflow: elide; }
-                            Text { text: p.cpu; width: 52px; color: Theme.text-primary;
+                            Text { text: p.cpu; width: 64px; color: root.sort-key == "cpu" ? Theme.text-primary : Theme.text-secondary;
                                    font-size: Theme.fs-xs; vertical-alignment: center;
                                    horizontal-alignment: right; }
-                            Text { text: p.mem; width: 52px; color: Theme.text-secondary;
+                            Text { text: p.mem; width: 64px; color: root.sort-key == "mem" ? Theme.text-primary : Theme.text-secondary;
                                    font-size: Theme.fs-xs; vertical-alignment: center;
                                    horizontal-alignment: right; }
                             Text { text: p.command; horizontal-stretch: 1; color: Theme.text-muted;

@@ -103,6 +103,17 @@ fn rdp_file_path(session_id: &str) -> std::path::PathBuf {
 /// Build the `.rdp` payload for `account`.
 #[cfg(windows)]
 fn rdp_file_contents(account: &Account<'_>) -> String {
+    rdp_file_contents_with(account, false)
+}
+
+/// Same file as [`rdp_file_contents`], but the window follows the local screen.
+///
+/// Smart sizing locks the remote picture to the size written below and then
+/// only scales it, which is why the maximize button does nothing. Dynamic
+/// resolution asks the server to grow the desktop when the window is enlarged,
+/// and `winposstr` opens that window maximized.
+#[cfg(windows)]
+fn rdp_file_contents_with(account: &Account<'_>, resizable: bool) -> String {
     let mut out = String::new();
     out.push_str(&format!(
         "full address:s:{}:{}\r\n",
@@ -129,6 +140,17 @@ fn rdp_file_contents(account: &Account<'_>) -> String {
     // desktop size, scaled when the window is resized instead of scrolling.
     if account.fullscreen {
         out.push_str("screen mode id:i:2\r\n");
+    } else if resizable {
+        out.push_str("screen mode id:i:1\r\n");
+        out.push_str(&format!("desktopwidth:i:{}\r\n", account.width));
+        out.push_str(&format!("desktopheight:i:{}\r\n", account.height));
+        out.push_str("dynamic resolution:i:1\r\n");
+        out.push_str("smart sizing:i:0\r\n");
+        // showCmd 3 = maximized. The rectangle is the restored size.
+        out.push_str(&format!(
+            "winposstr:s:0,3,0,0,{},{}\r\n",
+            account.width, account.height
+        ));
     } else {
         out.push_str("screen mode id:i:1\r\n");
         out.push_str(&format!("desktopwidth:i:{}\r\n", account.width));
@@ -137,12 +159,26 @@ fn rdp_file_contents(account: &Account<'_>) -> String {
     }
     // Local clipboard shared (what a launcher is expected to give you), and no
     // certificate warning for servers whose RDP certificate is self-signed —
-    // the usual case for a standalone Windows box.
+    // the usual case for a standalone Windows box. `1` is the checked state of
+    // the Clipboard box on the Local Resources page.
     out.push_str("redirectclipboard:i:1\r\n");
     out.push_str("authentication level:i:0\r\n");
     out.push_str("session bpp:i:32\r\n");
     out.push_str("compression:i:1\r\n");
     out
+}
+
+/// mstsc only applies the Local Resources checkboxes (clipboard included) when
+/// the file is UTF-16 LE with a BOM, the same encoding it writes on Save.
+/// ASCII is enough to open the host, which is why the session connected while
+/// the Clipboard box stayed clear.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn encode_rdp_file(contents: &str) -> Vec<u8> {
+    let mut bytes = vec![0xFF, 0xFE];
+    for unit in contents.encode_utf16() {
+        bytes.extend_from_slice(&unit.to_le_bytes());
+    }
+    bytes
 }
 
 /// Encrypt `plain` into the hex-encoded DPAPI blob an `.rdp` file expects.
@@ -214,20 +250,91 @@ fn protected_password(plain: &str) -> Option<String> {
 #[cfg(windows)]
 fn start_client(account: &Account<'_>, session_id: &str) -> Result<String, String> {
     let path = rdp_file_path(session_id);
-    std::fs::write(&path, rdp_file_contents(account)).map_err(|err| {
+    std::fs::write(&path, encode_rdp_file(&rdp_file_contents(account))).map_err(|err| {
         format!(
             "{} {}: {err}",
             t("无法写入连接文件", "cannot write the connection file"),
             path.display()
         )
     })?;
-    Command::new("mstsc").arg(&path).spawn().map_err(|err| {
+    spawn_mstsc(&path)?;
+    Ok(format!("{}:{} (mstsc)", account.host, account.port))
+}
+
+/// Primary monitor size, in pixels. Falls back to 1920×1080.
+#[cfg(windows)]
+fn primary_screen() -> (u16, u16) {
+    #[link(name = "user32")]
+    extern "system" {
+        fn GetSystemMetrics(n_index: i32) -> i32;
+    }
+    const SM_CXSCREEN: i32 = 0;
+    const SM_CYSCREEN: i32 = 1;
+    let width = unsafe { GetSystemMetrics(SM_CXSCREEN) };
+    let height = unsafe { GetSystemMetrics(SM_CYSCREEN) };
+    (
+        u16::try_from(width).unwrap_or(1920).max(1280),
+        u16::try_from(height).unwrap_or(1080).max(720),
+    )
+}
+
+/// Open `host:port` in a maximized remote-desktop window that can be resized.
+///
+/// Used for a local port forward, where there is no saved resolution. The
+/// desktop starts at the primary monitor size instead of the small default.
+#[cfg(windows)]
+pub(crate) fn launch_resizable(host: &str, port: u16) -> Result<String, String> {
+    let host = host.trim();
+    if host.is_empty() {
+        return Err(t("主机地址为空", "host is empty").to_string());
+    }
+    let (width, height) = primary_screen();
+    let account = Account {
+        host,
+        port,
+        user: "",
+        domain: "",
+        password: "",
+        fullscreen: false,
+        width,
+        height,
+    };
+    let safe: String = host
+        .chars()
+        .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '_' })
+        .collect();
+    let path = std::env::temp_dir().join(format!("meatshell-rdp-{safe}-{port}.rdp"));
+    std::fs::write(&path, encode_rdp_file(&rdp_file_contents_with(&account, true))).map_err(|err| {
+        format!(
+            "{} {}: {err}",
+            t("无法写入连接文件", "cannot write the connection file"),
+            path.display()
+        )
+    })?;
+    spawn_mstsc(&path)?;
+    Ok(format!("{host}:{port} (mstsc)"))
+}
+
+#[cfg(not(windows))]
+pub(crate) fn launch_resizable(host: &str, port: u16) -> Result<String, String> {
+    let mut session = Session::new_empty();
+    session.host = host.to_string();
+    session.port = port;
+    session.user.clear();
+    session.rdp_width = 1920;
+    session.rdp_height = 1080;
+    launch(&session)
+}
+
+#[cfg(windows)]
+fn spawn_mstsc(path: &std::path::Path) -> Result<(), String> {
+    Command::new("mstsc").arg(path).spawn().map_err(|err| {
         format!(
             "{} mstsc: {err}",
             t("无法启动系统远程桌面", "cannot start the system remote desktop client")
         )
     })?;
-    Ok(format!("{}:{} (mstsc)", account.host, account.port))
+    Ok(())
 }
 
 /// Portable pieces of the FreeRDP hand-off: which flavour the installed client
@@ -641,6 +748,44 @@ mod tests {
         assert!(contents.contains("screen mode id:i:1\r\n"));
         assert!(contents.contains("desktopwidth:i:1920\r\n"));
         assert!(contents.contains("desktopheight:i:1080\r\n"));
+        assert!(contents.contains("smart sizing:i:1\r\n"));
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn resizable_window_opens_maximized_and_can_grow() {
+        let account = Account {
+            host: "127.0.0.1",
+            port: 15900,
+            user: "",
+            domain: "",
+            password: "",
+            fullscreen: false,
+            width: 2560,
+            height: 1440,
+        };
+        let contents = rdp_file_contents_with(&account, true);
+        assert!(contents.contains("screen mode id:i:1\r\n"));
+        assert!(contents.contains("desktopwidth:i:2560\r\n"));
+        assert!(contents.contains("desktopheight:i:1440\r\n"));
+        assert!(contents.contains("dynamic resolution:i:1\r\n"));
+        assert!(contents.contains("smart sizing:i:0\r\n"));
+        assert!(contents.contains("winposstr:s:0,3,0,0,2560,1440\r\n"));
+        assert!(contents.contains("redirectclipboard:i:1\r\n"));
+    }
+
+    #[test]
+    fn rdp_file_is_utf16_so_mstsc_honors_the_clipboard_checkbox() {
+        let encoded = encode_rdp_file("redirectclipboard:i:1\r\n");
+        assert_eq!(&encoded[..2], &[0xFF, 0xFE]);
+        let text = String::from_utf16(
+            &encoded[2..]
+                .chunks_exact(2)
+                .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+                .collect::<Vec<_>>(),
+        )
+        .unwrap();
+        assert_eq!(text, "redirectclipboard:i:1\r\n");
     }
 
     /// Full screen lets mstsc use the local monitor resolution, so no desktop

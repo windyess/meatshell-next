@@ -283,8 +283,8 @@ export component TerminalView inherits Rectangle {
     in property <bool>    sftp-loading: false;
     in property <[SftpTreeNode]> sftp-tree-nodes: [];
     in property <[TabInfo]> sftp-transfer-targets: [];
-    in property <string> sftp-sort-key: "modified";
-    in property <int> sftp-sort-dir: -1;
+    in property <string> sftp-sort-key: "name";
+    in property <int> sftp-sort-dir: 1;
     in property <bool> sftp-show-type: true;
     in property <bool> sftp-show-size: true;
     in property <bool> sftp-show-modified: true;
@@ -419,9 +419,13 @@ export component TerminalView inherits Rectangle {
     callback sftp-sort-request(string);
     callback sftp-clear-sort();
     callback tunnel-add(string, string, string, string, string, string, bool, bool);
+    callback tunnel-update(string, string, string, string, string, string, string, bool, bool);
     callback tunnel-stop(string);
     callback tunnel-start(string);
     callback tunnel-delete(string);
+    callback tunnel-open-client(string, string);
+    in property <string> tunnel-client-hint;
+    in property <bool> tunnel-client-hint-error;
     // Context-menu extensions (#69), forwarded up to the app shell.
     callback sftp-rename-request(string, string);
     callback sftp-chmod-request(string, string, int);
@@ -2358,9 +2362,15 @@ export component TerminalView inherits Rectangle {
             tunnel-add(name, kind, bind, bind-port, host, host-port, save, auto-start) => {
                 root.tunnel-add(name, kind, bind, bind-port, host, host-port, save, auto-start);
             }
+            tunnel-update(id, name, kind, bind, bind-port, host, host-port, save, auto-start) => {
+                root.tunnel-update(id, name, kind, bind, bind-port, host, host-port, save, auto-start);
+            }
             tunnel-stop(id)     => { root.tunnel-stop(id); }
             tunnel-start(id)    => { root.tunnel-start(id); }
             tunnel-delete(id)   => { root.tunnel-delete(id); }
+            tunnel-client-hint: root.tunnel-client-hint;
+            tunnel-client-hint-error: root.tunnel-client-hint-error;
+            tunnel-open-client(tool, bind) => { root.tunnel-open-client(tool, bind); }
             rename-request(path, name) => { root.sftp-rename-request(path, name); }
             chmod-request(path, name, mode) => { root.sftp-chmod-request(path, name, mode); }
             copy-path(path)     => { root.sftp-copy-path(path); }

@@ -67,9 +67,109 @@ pub(super) fn proc_rows(procs: &[ProcInfo], current_user: &str, tab_id: &str) ->
             mem: format!("{:.1}", p.mem).into(),
             command: p.command.clone().into(),
             cpu_frac: (p.cpu / 100.0).clamp(0.0, 1.0),
+            mem_frac: (p.mem / 100.0).clamp(0.0, 1.0),
             own_process: !process_needs_root(current_user, &p.user),
         })
         .collect()
+}
+
+/// Rows for the process window, ordered by the column the user picked.
+pub(super) fn ordered_proc_rows(
+    procs: &[ProcInfo],
+    current_user: &str,
+    tab_id: &str,
+    sort_key: &str,
+    sort_dir: i32,
+) -> Vec<ProcRow> {
+    let mut items = procs.to_vec();
+    sort_procs(&mut items, sort_key, sort_dir);
+    proc_rows(&items, current_user, tab_id)
+}
+
+fn sort_procs(procs: &mut [ProcInfo], sort_key: &str, sort_dir: i32) {
+    procs.sort_by(|a, b| {
+        let ord = match sort_key {
+            "pid" => a.pid.cmp(&b.pid),
+            "user" => a
+                .user
+                .to_ascii_lowercase()
+                .cmp(&b.user.to_ascii_lowercase())
+                .then(a.pid.cmp(&b.pid)),
+            "mem" => a.mem.total_cmp(&b.mem).then(a.pid.cmp(&b.pid)),
+            "command" => a
+                .command
+                .to_ascii_lowercase()
+                .cmp(&b.command.to_ascii_lowercase())
+                .then(a.pid.cmp(&b.pid)),
+            _ => a
+                .cpu
+                .total_cmp(&b.cpu)
+                .then(a.mem.total_cmp(&b.mem))
+                .then(a.pid.cmp(&b.pid)),
+        };
+        if sort_dir < 0 { ord.reverse() } else { ord }
+    });
+}
+
+/// Next column and direction after a header click. A new column starts at a
+/// useful direction; the same column flips.
+pub(super) fn next_proc_sort(current_key: &str, current_dir: i32, clicked: &str) -> (String, i32) {
+    if current_key == clicked {
+        (clicked.to_string(), if current_dir < 0 { 1 } else { -1 })
+    } else {
+        let dir = match clicked {
+            "user" | "command" => 1,
+            _ => -1,
+        };
+        (clicked.to_string(), dir)
+    }
+}
+
+/// Re-order the rows already on screen. Used when refresh is paused.
+pub(super) fn resort_process_model(win: &AppWindow) {
+    let key = win.get_proc_sort_key().to_string();
+    let dir = win.get_proc_sort_dir();
+    let list = win.get_proc_list();
+    let Some(model) = list.as_any().downcast_ref::<VecModel<ProcRow>>() else {
+        return;
+    };
+    let mut rows = Vec::with_capacity(model.row_count());
+    for i in 0..model.row_count() {
+        if let Some(row) = model.row_data(i) {
+            rows.push(row);
+        }
+    }
+    rows.sort_by(|a, b| proc_row_order(a, b, &key, dir));
+    model.set_vec(rows);
+}
+
+fn proc_text_num(text: &str) -> f32 {
+    text.parse().unwrap_or(0.0)
+}
+
+fn proc_row_order(a: &ProcRow, b: &ProcRow, sort_key: &str, sort_dir: i32) -> std::cmp::Ordering {
+    let pid = |row: &ProcRow| row.pid.parse::<u32>().unwrap_or(0);
+    let ord = match sort_key {
+        "pid" => pid(a).cmp(&pid(b)),
+        "user" => a
+            .user
+            .to_ascii_lowercase()
+            .cmp(&b.user.to_ascii_lowercase())
+            .then(pid(a).cmp(&pid(b))),
+        "mem" => proc_text_num(&a.mem)
+            .total_cmp(&proc_text_num(&b.mem))
+            .then(pid(a).cmp(&pid(b))),
+        "command" => a
+            .command
+            .to_ascii_lowercase()
+            .cmp(&b.command.to_ascii_lowercase())
+            .then(pid(a).cmp(&pid(b))),
+        _ => proc_text_num(&a.cpu)
+            .total_cmp(&proc_text_num(&b.cpu))
+            .then(proc_text_num(&a.mem).total_cmp(&proc_text_num(&b.mem)))
+            .then(pid(a).cmp(&pid(b))),
+    };
+    if sort_dir < 0 { ord.reverse() } else { ord }
 }
 
 #[cfg(test)]
@@ -281,30 +381,49 @@ pub(super) fn place_system_info_window(main: &AppWindow, sys: &SystemInfoWindow)
 }
 
 /// Center the process monitor on the same physical monitor as the main window.
-/// Physical coordinates avoid logical/physical rounding errors when the two
-/// displays use different DPI scale factors. Keep the user's current process
-/// window size; opening it should reposition, not reset a manual resize.
+/// A window that is still at the old narrow size is widened so the command
+/// column can show a full line. A window the user has already made wider is
+/// left at that size.
 pub(super) fn place_process_window(main: &AppWindow, process: &ProcWindow) {
-    let monitor = main
+    let Some((mon_x, mon_y, mon_w, mon_h)) = main
         .window()
-        .with_winit_window(|ww| ww.current_monitor().or_else(|| ww.primary_monitor()))
-        .flatten();
-    let Some(monitor) = monitor else { return };
-    let origin = monitor.position();
-    let monitor_size = monitor.size();
+        .with_winit_window(|ww| {
+            let scale = ww.scale_factor().max(0.01);
+            let monitor = ww.current_monitor().or_else(|| ww.primary_monitor())?;
+            let pos = monitor.position();
+            let size = monitor.size();
+            Some((
+                pos.x as f64 / scale,
+                pos.y as f64 / scale,
+                size.width as f64 / scale,
+                size.height as f64 / scale,
+            ))
+        })
+        .flatten()
+    else {
+        return;
+    };
 
-    // The winit window may not exist yet on the first open (deferred creation,
-    // see place_system_info_window); fall back to a zero size, which anchors
-    // the window's top-left at the monitor center until the next open.
-    // Wayland ignores client-side positioning entirely, so this only affects
-    // X11/Windows first-open placement.
-    let window_size = process
-        .window()
-        .with_winit_window(|ww| ww.outer_size())
-        .unwrap_or_default();
-    let x = origin.x + monitor_size.width.saturating_sub(window_size.width) as i32 / 2;
-    let y = origin.y + monitor_size.height.saturating_sub(window_size.height) as i32 / 2;
+    let current = process.window().size();
+    let wide_enough = current.width >= 1000 && current.height >= 520;
+    let target_w = if wide_enough {
+        current.width as f64
+    } else {
+        (mon_w * 0.62).clamp(1000.0, (mon_w - 48.0).max(1000.0))
+    };
+    let target_h = if wide_enough {
+        current.height as f64
+    } else {
+        (mon_h * 0.62).clamp(560.0, (mon_h - 48.0).max(560.0))
+    };
+    let x = mon_x + (mon_w - target_w).max(0.0) / 2.0;
+    let y = mon_y + (mon_h - target_h).max(0.0) / 2.0;
+    if !wide_enough {
+        process
+            .window()
+            .set_size(slint::LogicalSize::new(target_w as f32, target_h as f32));
+    }
     process
         .window()
-        .set_position(slint::PhysicalPosition::new(x, y));
+        .set_position(slint::LogicalPosition::new(x as f32, y as f32));
 }

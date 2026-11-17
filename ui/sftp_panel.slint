@@ -92,6 +92,16 @@ export struct TunnelInfo {
     target: string,
     status: string,
     active: bool,
+    // Raw fields so selecting a row can fill the editor. `name` above is the
+    // display label, which is generated when the rule has no name of its own.
+    rule-name: string,
+    bind-addr: string,
+    listen-port: string,
+    target-host: string,
+    target-port: string,
+    auto-start: bool,
+    saved: bool,
+    failed: bool,
 }
 
 export struct QuickCmd {
@@ -166,8 +176,8 @@ export component SftpPanel inherits Rectangle {
     in property <[SftpTreeNode]> tree-nodes: [];
     in property <string> current-tab-id;
     in property <[TabInfo]> transfer-targets: [];
-    in property <string> sort-key: "modified";
-    in property <int> sort-dir: -1; // 1 asc / -1 desc (default: modified, newest first)
+    in property <string> sort-key: "name";
+    in property <int> sort-dir: 1; // 1 asc / -1 desc (default: name, A to Z)
     in property <bool> show-type: true;
     in property <bool> show-size: true;
     in property <bool> show-modified: true;
@@ -238,6 +248,29 @@ export component SftpPanel inherits Rectangle {
     property <string> tunnel-host-port: "80";
     property <bool> tunnel-save: false;
     property <bool> tunnel-auto-start: true;
+    property <string> tunnel-editing-id: "";
+    function clear-tunnel-editor() {
+        root.tunnel-editing-id = "";
+        root.tunnel-kind = "local";
+        root.tunnel-name = "";
+        root.tunnel-bind = "127.0.0.1";
+        root.tunnel-bind-port = "1080";
+        root.tunnel-host = "127.0.0.1";
+        root.tunnel-host-port = "80";
+        root.tunnel-save = false;
+        root.tunnel-auto-start = true;
+    }
+    function edit-tunnel(id: string, kind: string, rule-name: string, bind-addr: string, listen-port: string, target-host: string, target-port: string, auto-start: bool, saved: bool) {
+        root.tunnel-editing-id = id;
+        root.tunnel-kind = kind == "" ? "local" : kind;
+        root.tunnel-name = rule-name;
+        root.tunnel-bind = bind-addr == "" ? "127.0.0.1" : bind-addr;
+        root.tunnel-bind-port = listen-port;
+        root.tunnel-host = target-host;
+        root.tunnel-host-port = target-port;
+        root.tunnel-save = saved;
+        root.tunnel-auto-start = auto-start;
+    }
     // The full toolbar needs roughly 480px once a useful path field is included.
     // Below that, switch deliberately to a two-row compact layout instead of
     // allowing fixed-size controls to squeeze the path and each other (#285).
@@ -273,8 +306,12 @@ export component SftpPanel inherits Rectangle {
     callback sort-request(string /* name|size|modified */);
     callback clear-sort();
     callback tunnel-add(string /* name */, string /* kind */, string /* bind */, string /* bind-port */, string /* host */, string /* host-port */, bool /* save */, bool /* auto-start */);
+    callback tunnel-update(string /* id */, string /* name */, string /* kind */, string /* bind */, string /* bind-port */, string /* host */, string /* host-port */, bool /* save */, bool /* auto-start */);
     callback tunnel-stop(string /* id */);
     callback tunnel-start(string /* id */);
+    callback tunnel-open-client(string /* rdp | vnc | browser */, string /* bind */);
+    in property <string> tunnel-client-hint;
+    in property <bool> tunnel-client-hint-error;
     callback tunnel-delete(string /* id */);
     // Context-menu extensions (#69). The *-request callbacks open dialogs in
     // the app shell; copy-path goes straight to the system clipboard (toolbar /
@@ -1429,6 +1466,15 @@ export component SftpPanel inherits Rectangle {
                             Text { text: @tr("Remote (-R)"); color: root.tunnel-kind == "remote" ? #ffffff : Theme.text-primary; font-size: Theme.sftp-fs-xs; horizontal-alignment: center; vertical-alignment: center; }
                         }
                         Rectangle { horizontal-stretch: 1; }
+                        if root.tunnel-editing-id != "" : Rectangle {
+                            width: 52px; height: 24px; border-radius: Theme.radius-sm;
+                            background: cancel-edit-ta.has-hover ? Theme.bg-hover : transparent;
+                            cancel-edit-ta := TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => { root.clear-tunnel-editor(); }
+                            }
+                            Text { text: @tr("Cancel"); color: Theme.text-secondary; font-size: Theme.sftp-fs-sm; horizontal-alignment: center; vertical-alignment: center; }
+                        }
                         Rectangle {
                             width: 72px; height: 24px; border-radius: Theme.radius-sm;
                             background: add-tunnel-ta.has-hover ? Theme.accent-hover : Theme.accent;
@@ -1436,11 +1482,15 @@ export component SftpPanel inherits Rectangle {
                                 mouse-cursor: pointer;
                                 clicked => {
                                     if (root.tunnel-bind-port != "" && (root.tunnel-kind == "dynamic" || (root.tunnel-host != "" && root.tunnel-host-port != ""))) {
-                                        root.tunnel-add(root.tunnel-name, root.tunnel-kind, root.tunnel-bind, root.tunnel-bind-port, root.tunnel-host, root.tunnel-host-port, root.tunnel-save, root.tunnel-auto-start);
+                                        if (root.tunnel-editing-id == "") {
+                                            root.tunnel-add(root.tunnel-name, root.tunnel-kind, root.tunnel-bind, root.tunnel-bind-port, root.tunnel-host, root.tunnel-host-port, root.tunnel-save, root.tunnel-auto-start);
+                                        } else {
+                                            root.tunnel-update(root.tunnel-editing-id, root.tunnel-name, root.tunnel-kind, root.tunnel-bind, root.tunnel-bind-port, root.tunnel-host, root.tunnel-host-port, root.tunnel-save, root.tunnel-auto-start);
+                                        }
                                     }
                                 }
                             }
-                            Text { text: @tr("Add"); color: #ffffff; font-size: Theme.sftp-fs-sm; horizontal-alignment: center; vertical-alignment: center; }
+                            Text { text: root.tunnel-editing-id == "" ? @tr("Add") : @tr("Save"); color: #ffffff; font-size: Theme.sftp-fs-sm; horizontal-alignment: center; vertical-alignment: center; }
                         }
                     }
 
@@ -1537,6 +1587,12 @@ export component SftpPanel inherits Rectangle {
 
                     Rectangle { height: 1px; background: Theme.border-subtle; }
 
+                    if root.tunnel-client-hint != "" : Text {
+                        text: root.tunnel-client-hint;
+                        color: root.tunnel-client-hint-error ? Theme.danger : Theme.accent;
+                        font-size: Theme.sftp-fs-xs;
+                        wrap: word-wrap;
+                    }
                     if root.tunnels.length == 0 : Rectangle {
                         height: 36px;
                         Text { text: @tr("No tunnels"); color: Theme.text-muted; font-size: Theme.sftp-fs-sm; horizontal-alignment: center; vertical-alignment: center; }
@@ -1545,15 +1601,79 @@ export component SftpPanel inherits Rectangle {
                     for tun in root.tunnels : Rectangle {
                         height: 34px;
                         border-radius: Theme.radius-sm;
-                        background: tunnel-row-ta.has-hover ? Theme.bg-hover : Theme.bg-root.with-alpha(0.42);
-                        tunnel-row-ta := TouchArea {}
+                        background: root.tunnel-editing-id == tun.id
+                            ? Theme.accent.with-alpha(0.16)
+                            : tunnel-row-ta.has-hover ? Theme.bg-hover : Theme.bg-root.with-alpha(0.42);
+                        tunnel-row-ta := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => {
+                                root.edit-tunnel(tun.id, tun.kind, tun.rule-name, tun.bind-addr, tun.listen-port, tun.target-host, tun.target-port, tun.auto-start, tun.saved);
+                            }
+                            pointer-event(ev) => {
+                                if (ev.kind == PointerEventKind.down && ev.button == PointerEventButton.right
+                                        && tun.kind != "remote" && tun.kind != "dynamic") {
+                                    tun-menu.show();
+                                }
+                            }
+                        }
+                        tun-menu := PopupWindow {
+                            x: tunnel-row-ta.mouse-x;
+                            y: tunnel-row-ta.mouse-y;
+                            width: 168px;
+                            height: 3 * 28px + 8px;
+                            Rectangle {
+                                background: Theme.popup-bg;
+                                border-radius: Theme.radius-sm;
+                                border-width: 1px;
+                                border-color: Theme.border-strong;
+                                drop-shadow-blur: 10px;
+                                drop-shadow-color: #00000050;
+                                VerticalLayout {
+                                    padding: 4px;
+                                    spacing: 2px;
+                                    Rectangle {
+                                        height: 28px;
+                                        border-radius: Theme.radius-sm;
+                                        background: srdp-ta.has-hover && tun.active ? Theme.bg-hover : transparent;
+                                        srdp-ta := TouchArea {
+                                            enabled: tun.active;
+                                            mouse-cursor: tun.active ? pointer : default;
+                                            clicked => { tun-menu.close(); root.tunnel-open-client("rdp", tun.bind); }
+                                        }
+                                        Text { x: 10px; text: @tr("Remote Desktop"); color: tun.active ? Theme.text-primary : Theme.text-muted; font-size: Theme.sftp-fs-sm; vertical-alignment: center; }
+                                    }
+                                    Rectangle {
+                                        height: 28px;
+                                        border-radius: Theme.radius-sm;
+                                        background: svnc-ta.has-hover && tun.active ? Theme.bg-hover : transparent;
+                                        svnc-ta := TouchArea {
+                                            enabled: tun.active;
+                                            mouse-cursor: tun.active ? pointer : default;
+                                            clicked => { tun-menu.close(); root.tunnel-open-client("vnc", tun.bind); }
+                                        }
+                                        Text { x: 10px; text: @tr("VNC"); color: tun.active ? Theme.text-primary : Theme.text-muted; font-size: Theme.sftp-fs-sm; vertical-alignment: center; }
+                                    }
+                                    Rectangle {
+                                        height: 28px;
+                                        border-radius: Theme.radius-sm;
+                                        background: sweb-ta.has-hover && tun.active ? Theme.bg-hover : transparent;
+                                        sweb-ta := TouchArea {
+                                            enabled: tun.active;
+                                            mouse-cursor: tun.active ? pointer : default;
+                                            clicked => { tun-menu.close(); root.tunnel-open-client("browser", tun.bind); }
+                                        }
+                                        Text { x: 10px; text: @tr("Open in browser"); color: tun.active ? Theme.text-primary : Theme.text-muted; font-size: Theme.sftp-fs-sm; vertical-alignment: center; }
+                                    }
+                                }
+                            }
+                        }
                         HorizontalLayout {
                             padding-left: 8px; padding-right: 8px; spacing: 8px;
-                            Text { text: tun.active ? "●" : "○"; color: tun.active ? #28c76f : Theme.text-muted; width: 14px; font-size: Theme.sftp-fs-sm; vertical-alignment: center; horizontal-alignment: center; }
+                            Text { text: tun.active ? "●" : "○"; color: tun.failed ? Theme.danger : (tun.active ? #28c76f : Theme.text-muted); width: 14px; font-size: Theme.sftp-fs-sm; vertical-alignment: center; horizontal-alignment: center; }
                             Text { text: tun.kind == "dynamic" ? "-D" : (tun.kind == "remote" ? "-R" : "-L"); color: Theme.text-muted; width: 28px; font-size: Theme.sftp-fs-sm; vertical-alignment: center; horizontal-alignment: center; }
                             Text { text: tun.name; color: Theme.text-primary; width: 120px; font-size: Theme.sftp-fs-sm; overflow: elide; vertical-alignment: center; }
                             Text { text: tun.bind + (tun.target != "" ? " → " + tun.target : ""); color: Theme.text-secondary; horizontal-stretch: 1; font-size: Theme.sftp-fs-xs; overflow: elide; vertical-alignment: center; }
-                            Text { text: tun.status; color: tun.active ? Theme.accent : Theme.text-muted; width: 62px; font-size: Theme.sftp-fs-xs; overflow: elide; vertical-alignment: center; horizontal-alignment: right; }
+                            Text { text: tun.status; color: tun.failed ? Theme.danger : (tun.active ? Theme.accent : Theme.text-muted); width: 72px; font-size: Theme.sftp-fs-xs; overflow: elide; vertical-alignment: center; horizontal-alignment: right; }
                             Rectangle {
                                 width: 48px; height: 22px; border-radius: Theme.radius-sm;
                                 background: control-ta.has-hover ? Theme.bg-hover : transparent;
@@ -1563,7 +1683,13 @@ export component SftpPanel inherits Rectangle {
                             Rectangle {
                                 width: 52px; height: 22px; border-radius: Theme.radius-sm;
                                 background: delete-ta.has-hover ? Theme.danger.with-alpha(0.24) : transparent;
-                                delete-ta := TouchArea { mouse-cursor: pointer; clicked => { root.tunnel-delete(tun.id); } }
+                                delete-ta := TouchArea {
+                                    mouse-cursor: pointer;
+                                    clicked => {
+                                        if (root.tunnel-editing-id == tun.id) { root.clear-tunnel-editor(); }
+                                        root.tunnel-delete(tun.id);
+                                    }
+                                }
                                 Text { text: @tr("Delete"); color: Theme.danger; font-size: Theme.sftp-fs-xs; horizontal-alignment: center; vertical-alignment: center; }
                             }
                         }

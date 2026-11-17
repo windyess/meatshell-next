@@ -573,6 +573,18 @@ msgstr "结束进程"
 msgid "PID copied"
 msgstr "已复制 PID"
 
+msgid "Pause refresh"
+msgstr "暂停刷新"
+
+msgid "Resume refresh"
+msgstr "继续刷新"
+
+msgid "Refresh paused"
+msgstr "已暂停刷新"
+
+msgid "Refreshing every second"
+msgstr "每秒刷新"
+
 msgid "Terminate this process? It may lose unsaved data."
 msgstr "确定结束此进程吗？未保存的数据可能会丢失。"
 
@@ -738,6 +750,15 @@ msgstr "连接 SSH 会话后可转发端口"
 
 msgid "No forwarding rules"
 msgstr "暂无规则"
+
+msgid "Remote Desktop"
+msgstr "远程桌面"
+
+msgid "VNC"
+msgstr "VNC"
+
+msgid "Open in browser"
+msgstr "在浏览器中打开"
 
 msgid "Local listen address"
 msgstr "本机监听地址"

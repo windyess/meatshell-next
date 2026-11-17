@@ -81,10 +81,47 @@ pub(super) fn wire_monitor_windows(ctx: &WinCtx) {
             main.set_process_window_open(true);
             main.invoke_refresh_sidebar();
             pw.set_host(main.get_connection_state());
+            pw.set_sort_key(main.get_proc_sort_key());
+            pw.set_sort_dir(main.get_proc_sort_dir());
+            pw.set_paused(main.get_proc_paused());
             sync_proc_theme(&main, &pw);
             let _ = pw.show();
             place_process_window(&main, &pw);
             pw.window().with_winit_window(|ww| ww.focus_window());
+        });
+    }
+    {
+        let win_weak = window.as_weak();
+        let proc_weak = proc_win.as_weak();
+        proc_win.on_sort_by(move |key| {
+            let (Some(main), Some(pw)) = (win_weak.upgrade(), proc_weak.upgrade()) else {
+                return;
+            };
+            let (next_key, next_dir) = next_proc_sort(
+                main.get_proc_sort_key().as_str(),
+                main.get_proc_sort_dir(),
+                key.as_str(),
+            );
+            main.set_proc_sort_key(next_key.clone().into());
+            main.set_proc_sort_dir(next_dir);
+            pw.set_sort_key(next_key.into());
+            pw.set_sort_dir(next_dir);
+            resort_process_model(&main);
+        });
+    }
+    {
+        let win_weak = window.as_weak();
+        let proc_weak = proc_win.as_weak();
+        proc_win.on_toggle_pause(move || {
+            let (Some(main), Some(pw)) = (win_weak.upgrade(), proc_weak.upgrade()) else {
+                return;
+            };
+            let paused = !main.get_proc_paused();
+            main.set_proc_paused(paused);
+            pw.set_paused(paused);
+            if !paused {
+                main.invoke_refresh_sidebar();
+            }
         });
     }
     {

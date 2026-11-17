@@ -381,6 +381,32 @@ pub(crate) fn named_display_groups(explicit: &[String], sessions: &[Session]) ->
     named
 }
 
+/// Place `groups` into the saved manual order. Names the user has not placed
+/// stay at the end, in their existing order. `None` leaves the list as given.
+pub(crate) fn apply_group_order(groups: Vec<String>, order: Option<&[String]>) -> Vec<String> {
+    let mut unique = Vec::new();
+    for group in groups {
+        if !unique.iter().any(|existing: &String| existing == &group) {
+            unique.push(group);
+        }
+    }
+    let Some(order) = order else {
+        return unique;
+    };
+    let mut remaining = unique;
+    let mut ordered = Vec::new();
+    for name in order {
+        if name.eq_ignore_ascii_case("system") {
+            continue;
+        }
+        if let Some(index) = remaining.iter().position(|group| group == name) {
+            ordered.push(remaining.remove(index));
+        }
+    }
+    ordered.extend(remaining);
+    ordered
+}
+
 /// Repair configurations created before #316/#324, when the Move-to menu exposed
 /// the built-in `system` group as a destination for saved server sessions.
 fn normalize_reserved_session_groups(cfg: &mut ConfigFile) -> bool {
@@ -654,19 +680,7 @@ impl ConfigStore {
         };
         let is_collapsed = |name: &str| collapsed_groups.iter().any(|g| g == name);
 
-        let mut display: Vec<String> = Vec::new();
-        if self
-            .cache
-            .sessions
-            .iter()
-            .any(|s| display_group(s) == "default")
-        {
-            display.push("default".to_string());
-        }
-        display.extend(named_display_groups(
-            &self.cache.groups,
-            &self.cache.sessions,
-        ));
+        let display = self.non_system_display_groups();
 
         let Some(pos) = display.iter().position(|g| g == &group) else {
             return false;
@@ -1688,6 +1702,52 @@ impl ConfigStore {
         self.cache.collapsed_session_groups.as_deref()
     }
 
+    pub fn session_group_order(&self) -> Option<&[String]> {
+        self.cache.session_group_order.as_deref()
+    }
+
+    /// Folders under the pinned system group: ungrouped `"default"` when it
+    /// has sessions, then named folders. A saved drag order replaces A→Z.
+    fn non_system_display_groups(&self) -> Vec<String> {
+        let mut groups = Vec::new();
+        if self.cache.sessions.iter().any(|session| {
+            session.group.is_empty() || is_reserved_session_group(session.group.trim())
+        }) {
+            groups.push("default".to_string());
+        }
+        groups.extend(named_display_groups(
+            &self.cache.groups,
+            &self.cache.sessions,
+        ));
+        apply_group_order(groups, self.cache.session_group_order.as_deref())
+    }
+
+    /// Drag a Quick Connect folder up or down. `system` stays pinned. The
+    /// resulting order is stored so later new folders append after it.
+    pub fn reorder_group(&mut self, name: &str, dir: isize) -> bool {
+        let name = name.trim();
+        if dir == 0 || name.is_empty() || name.eq_ignore_ascii_case("system") {
+            return false;
+        }
+        let mut order = self.non_system_display_groups();
+        let Some(pos) = order.iter().position(|group| group == name) else {
+            return false;
+        };
+        let target = if dir < 0 {
+            pos.checked_sub(1)
+        } else if pos + 1 < order.len() {
+            Some(pos + 1)
+        } else {
+            None
+        };
+        let Some(target) = target else {
+            return false;
+        };
+        order.swap(pos, target);
+        self.cache.session_group_order = Some(order);
+        true
+    }
+
     /// Remember a Quick Connect folder's open/closed state. On the first
     /// interaction, materialise the default-collapsed state for every existing
     /// folder so expanding one folder does not accidentally expand the rest.
@@ -1748,6 +1808,11 @@ impl ConfigStore {
             return;
         }
         self.cache.groups.push(n.clone());
+        if let Some(order) = &mut self.cache.session_group_order {
+            if !order.iter().any(|group| group == &n) {
+                order.push(n.clone());
+            }
+        }
         if let Some(groups) = &mut self.cache.collapsed_session_groups {
             groups.push(n);
             groups.sort();
@@ -1762,6 +1827,9 @@ impl ConfigStore {
             return;
         }
         self.cache.groups.retain(|g| g != name);
+        if let Some(order) = &mut self.cache.session_group_order {
+            order.retain(|group| group != name);
+        }
         if let Some(groups) = &mut self.cache.collapsed_session_groups {
             groups.retain(|group| group != name);
         }
@@ -1801,6 +1869,13 @@ impl ConfigStore {
             }
             groups.sort();
             groups.dedup();
+        }
+        if let Some(order) = &mut self.cache.session_group_order {
+            for group in order.iter_mut() {
+                if group == old {
+                    *group = n.clone();
+                }
+            }
         }
         self.cache.groups.sort();
         self.cache.groups.dedup();
@@ -2218,6 +2293,23 @@ mod tests {
             "beta"
         );
         assert!(store.groups().iter().any(|g| g == "alpha"));
+    }
+
+    #[test]
+    fn reorder_group_moves_a_folder_and_remembers_the_order() {
+        let mut store = reorder_store();
+        assert!(store.reorder_group("beta", -1));
+        assert_eq!(
+            store.session_group_order().unwrap(),
+            &["default".to_string(), "beta".to_string(), "alpha".to_string()]
+        );
+        assert!(store.reorder_group("default", 1));
+        assert_eq!(
+            store.session_group_order().unwrap(),
+            &["beta".to_string(), "default".to_string(), "alpha".to_string()]
+        );
+        assert!(!store.reorder_group("system", 1));
+        assert!(!store.reorder_group("beta", -1));
     }
 
     #[test]

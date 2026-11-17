@@ -1064,16 +1064,35 @@ fn tunnel_label(f: &PortForward) -> String {
 
 fn tunnel_info(id: String, f: &PortForward, active: bool, status: &str) -> RuntimeTunnelInfo {
     RuntimeTunnelInfo {
-        id,
+        id: id.clone(),
         name: tunnel_label(f),
+        rule_name: f.name.trim().to_string(),
         kind: f.kind.clone(),
         bind_addr: normalized_bind_addr(f),
         bind_port: f.bind_port,
         host: f.host.trim().to_string(),
         host_port: f.host_port,
+        auto_start: f.auto_start,
+        saved: id.starts_with("saved-") || id.starts_with("config-"),
         active,
+        failed: false,
         status: status.to_string(),
     }
+}
+
+fn report_tunnel_error(events: &UnboundedSender<SessionEvent>, message: String) {
+    let _ = events.send(SessionEvent::Output(format!("\r\n[meatshell] {message}\r\n")));
+    let _ = events.send(SessionEvent::TunnelNotice {
+        error: true,
+        message,
+    });
+}
+
+fn clear_tunnel_notice(events: &UnboundedSender<SessionEvent>) {
+    let _ = events.send(SessionEvent::TunnelNotice {
+        error: false,
+        message: String::new(),
+    });
 }
 
 fn emit_tunnel_update(
@@ -1085,34 +1104,69 @@ fn emit_tunnel_update(
     let _ = events.send(SessionEvent::TunnelUpdate(rows));
 }
 
-fn start_runtime_forward(
+async fn start_runtime_forward(
     handle: Arc<tokio::sync::Mutex<Handle<ClientHandler>>>,
     id: String,
     forward: PortForward,
     events: &UnboundedSender<SessionEvent>,
 ) -> RuntimeForward {
-    let info = tunnel_info(id, &forward, true, t("运行中", "running"));
-    let task = match forward.kind.as_str() {
-        "local" => Some(crate::tunnel::spawn_local(
+    let mut info = tunnel_info(id, &forward, false, t("监听失败", "bind failed"));
+    let kind_flag = if forward.kind == "dynamic" { "-D" } else { "-L" };
+    let (task, bound) = if forward.kind == "dynamic" {
+        crate::tunnel::spawn_dynamic(
+            handle,
+            info.bind_addr.clone(),
+            info.bind_port,
+            events.clone(),
+        )
+    } else {
+        crate::tunnel::spawn_local(
             handle,
             info.bind_addr.clone(),
             info.bind_port,
             info.host.clone(),
             info.host_port,
             events.clone(),
-        )),
-        "dynamic" => Some(crate::tunnel::spawn_dynamic(
-            handle,
-            info.bind_addr.clone(),
-            info.bind_port,
-            events.clone(),
-        )),
-        _ => None,
+        )
     };
-    RuntimeForward {
-        info,
-        task,
-        forward,
+    let bind = format!("{}:{}", info.bind_addr, info.bind_port);
+    match bound.await {
+        Ok(Ok(())) => {
+            info.active = true;
+            info.status = t("运行中", "running").to_string();
+            clear_tunnel_notice(events);
+            RuntimeForward {
+                info,
+                task: Some(task),
+                forward,
+            }
+        }
+        Ok(Err(err)) => {
+            info.failed = true;
+            report_tunnel_error(
+                events,
+                format!("{} {kind_flag} {bind}: {err}", t("监听失败", "Listen failed")),
+            );
+            task.abort();
+            let _ = task.await;
+            RuntimeForward {
+                info,
+                task: None,
+                forward,
+            }
+        }
+        Err(_) => {
+            info.failed = true;
+            report_tunnel_error(
+                events,
+                format!("{} {kind_flag} {bind}", t("监听失败", "Listen failed")),
+            );
+            RuntimeForward {
+                info,
+                task: None,
+                forward,
+            }
+        }
     }
 }
 
@@ -1128,13 +1182,17 @@ async fn start_remote_forward(
     let bind = info.bind_addr.clone();
     let duplicate = targets.lock().unwrap().contains_key(&port);
     if duplicate {
-        let _ = events.send(SessionEvent::Output(format!(
-            "\r\n[meatshell] -R {bind}:{port} {}\r\n",
-            t(
-                "远程监听端口已被另一个转发使用",
-                "remote listen port is already in use"
-            )
-        )));
+        info.failed = true;
+        report_tunnel_error(
+            events,
+            format!(
+                "-R {bind}:{port} {}",
+                t(
+                    "远程监听端口已被另一个转发使用",
+                    "remote listen port is already in use"
+                )
+            ),
+        );
     } else {
         // Register before requesting the listener: a fast incoming connection
         // can arrive as soon as the server accepts the request.
@@ -1145,7 +1203,9 @@ async fn start_remote_forward(
         match handle.lock().await.tcpip_forward(bind.clone(), port).await {
             Ok(_) => {
                 info.active = true;
+                info.failed = false;
                 info.status = t("运行中", "running").to_string();
+                clear_tunnel_notice(events);
                 let _ = events.send(SessionEvent::Output(format!(
                     "\r\n[meatshell] -R {bind}:{port} → {}:{}\r\n",
                     forward.host, forward.host_port
@@ -1153,9 +1213,11 @@ async fn start_remote_forward(
             }
             Err(error) => {
                 targets.lock().unwrap().remove(&port);
-                let _ = events.send(SessionEvent::Output(format!(
-                    "\r\n[meatshell] -R {bind}:{port} 请求失败 / request failed: {error}\r\n"
-                )));
+                info.failed = true;
+                report_tunnel_error(
+                    events,
+                    format!("-R {bind}:{port} {}: {error}", t("请求失败", "request failed")),
+                );
             }
         }
     }
@@ -1172,10 +1234,7 @@ async fn stop_runtime_forward(
     targets: &RemoteForwardMap,
     events: &UnboundedSender<SessionEvent>,
 ) -> bool {
-    if !entry.info.active {
-        return true;
-    }
-    if entry.forward.kind == "remote" {
+    if entry.forward.kind == "remote" && entry.info.active {
         let bind = entry.info.bind_addr.clone();
         let port = entry.info.bind_port as u32;
         if let Err(error) = handle
@@ -1184,17 +1243,22 @@ async fn stop_runtime_forward(
             .cancel_tcpip_forward(bind.clone(), port)
             .await
         {
-            let _ = events.send(SessionEvent::Output(format!(
-                "\r\n[meatshell] -R {bind}:{port} 取消失败 / cancel failed: {error}\r\n"
-            )));
+            report_tunnel_error(
+                events,
+                format!("-R {bind}:{port} {}: {error}", t("取消失败", "cancel failed")),
+            );
             return false;
         }
         targets.lock().unwrap().remove(&port);
     }
+    // Abort, then wait until the task drops its TcpListener. Rebinding the same
+    // port before that close returns "address already in use".
     if let Some(task) = entry.task.take() {
         task.abort();
+        let _ = task.await;
     }
     entry.info.active = false;
+    entry.info.failed = false;
     entry.info.status = t("已停止", "stopped").to_string();
     true
 }
@@ -1897,7 +1961,85 @@ async fn run_session(
     // Process sampling has its own channel. The broader resource command above
     // includes probes such as `df` which can block indefinitely on a stale NFS
     // mount; that must not leave dead PIDs frozen in the process window.
-    const PROC_CMD: &[u8] = b"PATH=/usr/bin:/bin:/usr/sbin:/sbin; export PATH; while :; do echo __ME__; id -un 2>/dev/null; echo __PS__; ps -eo pid,user:32,pcpu,pmem,args --sort=-pcpu 2>/dev/null | head -n 41 | cut -c -200; echo __PSTICK__; sleep 2; done\n";
+    // `ps` %CPU is the average since each process started, so a busy daemon
+    // stays at the same number forever. Sample /proc twice, one second apart,
+    // and keep both the busiest and the largest processes. Fall back to `ps`
+    // where /proc is missing.
+    const PROC_CMD: &[u8] = br#"PATH=/usr/bin:/bin:/usr/sbin:/sbin; export PATH; LC_ALL=C; export LC_ALL; hz=$(getconf CLK_TCK 2>/dev/null || echo 100); while :; do echo __ME__; id -un 2>/dev/null; echo __PS__; out=$(awk -v hz="$hz" 'BEGIN {
+  if (hz+0 < 1) hz = 100
+  memkb = 0
+  while ((getline ml < "/proc/meminfo") > 0) { if (index(ml, "MemTotal:") == 1) { split(ml, mf, " "); memkb = mf[2]+0; break } }
+  close("/proc/meminfo")
+  FS=":"
+  while ((getline < "/etc/passwd") > 0) name[$3]=$1
+  close("/etc/passwd")
+  FS=" "
+  t1 = up()
+  snap(prev)
+  system("sleep 1")
+  t2 = up()
+  snap(cur)
+  dt = t2 - t1
+  if (dt < 0.05) dt = 1
+  for (pid in cur) {
+    if (!(pid in prev)) continue
+    d = cur[pid] - prev[pid]
+    if (d < 0) d = 0
+    cpu = d / (dt * hz) * 100
+    if (cpu < 0) cpu = 0
+    rss = rssp[pid] * 4
+    mp = (memkb > 0) ? rss / memkb * 100 : 0
+    u = uname[pid]
+    if (u == "") u = "?"
+    c = comm[pid]
+    if (c == "") c = "?"
+    if (length(c) > 180) c = substr(c, 1, 180)
+    printf "%d %s %.1f %.1f %s\n", pid, u, cpu, mp, c
+  }
+}
+function up(   l, a) {
+  l = ""
+  if ((getline l < "/proc/uptime") != 1) { close("/proc/uptime"); return 0 }
+  close("/proc/uptime")
+  split(l, a, " ")
+  return a[1]+0
+}
+function snap(ticks,   cmd, line, pid, s, i, rest, n, f, cl, x, u, uf) {
+  cmd = "ls -d /proc/[0-9]* 2>/dev/null"
+  while ((cmd | getline line) > 0) {
+    pid = line
+    sub(/^\/proc\//, "", pid)
+    s = ""
+    if ((getline s < ("/proc/" pid "/stat")) != 1) { close("/proc/" pid "/stat"); continue }
+    close("/proc/" pid "/stat")
+    i = index(s, ")")
+    if (i < 2) continue
+    rest = substr(s, i+2)
+    n = split(rest, f, " ")
+    if (n < 22) continue
+    ticks[pid] = f[12] + f[13]
+    rssp[pid] = f[22]
+    if (!(pid in comm)) {
+      cl = ""
+      while ((getline x < ("/proc/" pid "/cmdline")) > 0) cl = cl x
+      close("/proc/" pid "/cmdline")
+      gsub(/\0/, " ", cl)
+      gsub(/\n/, " ", cl)
+      gsub(/^[ ]+|[ ]+$/, "", cl)
+      if (cl == "") cl = substr(s, index(s, "(")+1, i - index(s, "(") - 1)
+      comm[pid] = cl
+      u = ""
+      while ((getline x < ("/proc/" pid "/status")) > 0) {
+        if (index(x, "Uid:") == 1) { split(x, uf, " "); u = name[uf[2]]; if (u == "") u = uf[2]; break }
+      }
+      close("/proc/" pid "/status")
+      uname[pid] = u
+    }
+  }
+  close(cmd)
+}
+' </dev/null 2>/dev/null) || true; if [ -z "$out" ]; then cpu=$(ps -eo pid,user:32,pcpu,pmem,args --sort=-pcpu 2>/dev/null | tail -n +2 | head -n 40); mem=$(ps -eo pid,user:32,pcpu,pmem,args --sort=-pmem 2>/dev/null | tail -n +2 | head -n 40); else cpu=$(printf '%s\n' "$out" | sort -k3,3nr | head -n 40); mem=$(printf '%s\n' "$out" | sort -k4,4nr | head -n 40); fi; printf '%s\n%s\n' "$cpu" "$mem" | awk 'NF && !seen[$1]++' | cut -c -200; echo __PSTICK__; done
+"#;
     let mut proc_channel: Option<Channel<Msg>> = None;
     let mut sys_channel: Option<Channel<Msg>> = None;
     let mut proc_buf = String::new();
@@ -1935,7 +2077,7 @@ async fn run_session(
         } else if f.kind == "remote" {
             start_remote_forward(&handle, &remote_forwards, id.clone(), f.clone(), &events).await
         } else {
-            start_runtime_forward(handle.clone(), id.clone(), f.clone(), &events)
+            start_runtime_forward(handle.clone(), id.clone(), f.clone(), &events).await
         };
         runtime_forwards.insert(id, entry);
     }
@@ -2051,7 +2193,7 @@ async fn run_session(
                         let entry = if forward.kind == "remote" {
                             start_remote_forward(&handle, &remote_forwards, id.clone(), forward, &events).await
                         } else {
-                            start_runtime_forward(handle.clone(), id.clone(), forward, &events)
+                            start_runtime_forward(handle.clone(), id.clone(), forward, &events).await
                         };
                         runtime_forwards.insert(id, entry);
                         emit_tunnel_update(&runtime_forwards, &events);
@@ -2069,7 +2211,7 @@ async fn run_session(
                             let entry = if forward.kind == "remote" {
                                 start_remote_forward(&handle, &remote_forwards, id.clone(), forward, &events).await
                             } else {
-                                start_runtime_forward(handle.clone(), id.clone(), forward, &events)
+                                start_runtime_forward(handle.clone(), id.clone(), forward, &events).await
                             };
                             runtime_forwards.insert(id, entry);
                             emit_tunnel_update(&runtime_forwards, &events);
@@ -2082,6 +2224,30 @@ async fn run_session(
                             }
                             emit_tunnel_update(&runtime_forwards, &events);
                         }
+                    }
+                    Some(SessionCommand::UpdateTunnel { id, forward, saved }) => {
+                        let restart = runtime_forwards
+                            .get(&id)
+                            .map(|entry| entry.info.active || entry.info.failed)
+                            .unwrap_or(false);
+                        if let Some(entry) = runtime_forwards.get_mut(&id) {
+                            let _ = stop_runtime_forward(entry, &handle, &remote_forwards, &events).await;
+                        }
+                        let kind = forward.kind.clone();
+                        let mut entry = if !restart {
+                            RuntimeForward {
+                                info: tunnel_info(id.clone(), &forward, false, t("已停止", "stopped")),
+                                task: None,
+                                forward,
+                            }
+                        } else if kind == "remote" {
+                            start_remote_forward(&handle, &remote_forwards, id.clone(), forward, &events).await
+                        } else {
+                            start_runtime_forward(handle.clone(), id.clone(), forward, &events).await
+                        };
+                        entry.info.saved = saved;
+                        runtime_forwards.insert(id, entry);
+                        emit_tunnel_update(&runtime_forwards, &events);
                     }
                     Some(SessionCommand::KillProcess { pid, root_password, reply }) => {
                         let exec_handle = handle.clone();
@@ -2448,7 +2614,7 @@ async fn run_session(
 }
 
 fn parse_process_block(block: &str) -> (String, Vec<ProcInfo>) {
-    const MAX_PROCESS_ENTRIES: usize = 64;
+    const MAX_PROCESS_ENTRIES: usize = 80;
     enum Section {
         None,
         User,
@@ -2472,7 +2638,36 @@ fn parse_process_block(block: &str) -> (String, Vec<ProcInfo>) {
             },
         }
     }
+    procs.sort_by(|a, b| {
+        b.cpu
+            .total_cmp(&a.cpu)
+            .then_with(|| b.mem.total_cmp(&a.mem))
+            .then_with(|| a.pid.cmp(&b.pid))
+    });
     (current_user, procs)
+}
+
+#[cfg(test)]
+mod process_sample_tests {
+    use super::parse_process_block;
+
+    #[test]
+    fn process_sample_is_ordered_by_current_cpu() {
+        let block = "\
+__ME__
+gtgpu
+__PS__
+1 root 1.0 0.1 init
+3 root 9.0 3.0 mid
+2 root 50.0 1.0 busy
+";
+        let (user, procs) = parse_process_block(block);
+        assert_eq!(user, "gtgpu");
+        assert_eq!(
+            procs.iter().map(|p| p.pid).collect::<Vec<_>>(),
+            vec![2, 3, 1]
+        );
+    }
 }
 
 /// Parse one monitor sample (a block of `/proc/stat` cpu line + `/proc/meminfo`

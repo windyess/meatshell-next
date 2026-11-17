@@ -11,7 +11,7 @@ pub(super) fn sidebar_updates_visible(win: &AppWindow) -> bool {
 pub(super) fn refresh_process_model(win: &AppWindow, statuses: &TabStatuses) {
     // The detached process window can be focused while the main window is not,
     // so its own open state—not main-window activity—controls live updates.
-    if !win.get_process_window_open() {
+    if !win.get_process_window_open() || win.get_proc_paused() {
         return;
     }
     let active = win.get_active_tab_id().to_string();
@@ -20,7 +20,15 @@ pub(super) fn refresh_process_model(win: &AppWindow, statuses: &TabStatuses) {
         .unwrap()
         .get(&active)
         .filter(|status| status.state == 1)
-        .map(|status| proc_rows(&status.procs, &status.user, &active))
+        .map(|status| {
+            ordered_proc_rows(
+                &status.procs,
+                &status.user,
+                &active,
+                win.get_proc_sort_key().as_str(),
+                win.get_proc_sort_dir(),
+            )
+        })
         .unwrap_or_default();
     if let Some(model) = win
         .get_proc_list()
@@ -98,7 +106,7 @@ pub(super) fn refresh_sidebar(
     // remote session has process data; default to empty and let the connected
     // branch below fill it in.
     let set_procs = |win: &AppWindow, procs: &[ProcInfo], current_user: &str, tab_id: &str| {
-        if !win.get_process_window_open() {
+        if !win.get_process_window_open() || win.get_proc_paused() {
             return;
         }
         if let Some(vm) = win
@@ -106,7 +114,13 @@ pub(super) fn refresh_sidebar(
             .as_any()
             .downcast_ref::<VecModel<ProcRow>>()
         {
-            vm.set_vec(proc_rows(procs, current_user, tab_id));
+            vm.set_vec(ordered_proc_rows(
+                procs,
+                current_user,
+                tab_id,
+                win.get_proc_sort_key().as_str(),
+                win.get_proc_sort_dir(),
+            ));
         }
     };
     let set_system_models = |win: &AppWindow,

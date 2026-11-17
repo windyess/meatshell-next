@@ -1,5 +1,5 @@
-/// One process row sampled from the remote `ps` (#23). CPU/mem are percentages
-/// as reported by `ps` (pcpu/pmem); `command` is the (width-truncated) args.
+/// One process row (#23). CPU is the last sample interval, not the lifetime
+/// average; memory is the resident share. `command` is the truncated args.
 #[derive(Debug, Clone)]
 pub struct ProcInfo {
     pub pid: u32,
@@ -26,11 +26,18 @@ pub struct SystemDetails {
 pub struct RuntimeTunnelInfo {
     pub id: String,
     pub name: String,
+    /// The name the user typed. Empty when `name` is a generated label.
+    pub rule_name: String,
     pub kind: String,
     pub bind_addr: String,
     pub bind_port: u16,
     pub host: String,
     pub host_port: u16,
+    pub auto_start: bool,
+    /// Stored on the SSH session (`saved-` / `config-`), not a runtime-only rule.
+    pub saved: bool,
     pub active: bool,
+    /// Listen or remote-forward request failed. The row stays stopped.
+    pub failed: bool,
     pub status: String,
 }

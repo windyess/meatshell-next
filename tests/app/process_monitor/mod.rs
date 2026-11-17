@@ -25,6 +25,29 @@ fn marks_owner_and_preserves_source_tab() {
 }
 
 #[test]
+fn memory_sort_puts_the_largest_first() {
+    let input = vec![
+        ProcInfo {
+            pid: 1,
+            user: "a".into(),
+            cpu: 9.0,
+            mem: 1.0,
+            command: "cpu-heavy".into(),
+        },
+        ProcInfo {
+            pid: 2,
+            user: "b".into(),
+            cpu: 0.1,
+            mem: 40.0,
+            command: "mem-heavy".into(),
+        },
+    ];
+    let rows = ordered_proc_rows(&input, "a", "t", "mem", -1);
+    assert_eq!(rows[0].pid.as_str(), "2");
+    assert!(rows[0].mem_frac > rows[1].mem_frac);
+}
+
+#[test]
 fn privilege_rules_match_effective_login_user() {
     assert!(!process_needs_root("alice", "alice"));
     assert!(process_needs_root("alice", "root"));

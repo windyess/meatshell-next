@@ -464,6 +464,15 @@ component TunnelBlock inherits Rectangle {
     callback start-rule(string);
     callback stop-rule(string);
     callback manage();
+    // tool is "rdp", "vnc", or "browser". bind is the rule's local listen address.
+    callback open-client(string, string);
+    in property <string> client-hint;
+    in property <bool> client-hint-error;
+
+    property <length> menu-x: 0px;
+    property <length> menu-y: 0px;
+    property <string> menu-bind: "";
+    property <bool> menu-ready: false;
 
     background: transparent;
     // Hug the rules. A stretch here was the blank gap under the last rule.
@@ -471,11 +480,12 @@ component TunnelBlock inherits Rectangle {
     property <length> list-h: (!root.available || root.tunnels.length == 0)
         ? 16px
         : min(66px, root.tunnels.length * 24px);
+    property <length> hint-h: root.client-hint == "" ? 0px : hint-label.preferred-height;
     vertical-stretch: root.hug-content ? 0 : 1;
     // Fixed min and max when hugging, so the block cannot eat the leftover
     // sidebar height. Percent and px cannot share one ternary in Slint.
-    min-height: root.hug-content ? 24px + root.list-h : 44px;
-    max-height: root.hug-content ? 24px + root.list-h : 10000px;
+    min-height: root.hug-content ? 24px + root.list-h + root.hint-h : 44px;
+    max-height: root.hug-content ? 24px + root.list-h + root.hint-h : 10000px;
 
     VerticalLayout {
         spacing: 4px;
@@ -543,6 +553,15 @@ component TunnelBlock inherits Rectangle {
                             if (tun.active) { root.stop-rule(tun.id); }
                             else { root.start-rule(tun.id); }
                         }
+                        pointer-event(e) => {
+                            if (e.kind == PointerEventKind.down && e.button == PointerEventButton.right) {
+                                root.menu-bind = tun.bind;
+                                root.menu-ready = tun.active && tun.kind != "remote" && tun.kind != "dynamic";
+                                root.menu-x = tun-ta.absolute-position.x - root.absolute-position.x + tun-ta.mouse-x;
+                                root.menu-y = tun-ta.absolute-position.y - root.absolute-position.y + tun-ta.mouse-y;
+                                client-menu.show();
+                            }
+                        }
                     }
                     HorizontalLayout {
                         padding-left: 2px;
@@ -550,7 +569,7 @@ component TunnelBlock inherits Rectangle {
                         spacing: 4px;
                         Text {
                             text: tun.active ? "●" : "○";
-                            color: tun.active ? #28c76f : Theme.text-muted;
+                            color: tun.failed ? Theme.danger : (tun.active ? #28c76f : Theme.text-muted);
                             width: 12px;
                             font-size: Theme.fs-xs;
                             vertical-alignment: center;
@@ -573,12 +592,89 @@ component TunnelBlock inherits Rectangle {
                         }
                         Text {
                             text: tun.status;
-                            color: tun.active ? #28c76f : Theme.text-muted;
+                            color: tun.failed ? Theme.danger : (tun.active ? #28c76f : Theme.text-muted);
                             font-size: Theme.fs-xs;
                             vertical-alignment: center;
-                            max-width: 56px;
+                            max-width: 72px;
                             overflow: elide;
                         }
+                    }
+                }
+            }
+        }
+        hint-label := Text {
+            text: root.client-hint;
+            color: root.client-hint-error ? Theme.danger : Theme.accent;
+            font-size: Theme.fs-xs;
+            wrap: word-wrap;
+            height: root.client-hint == "" ? 0px : self.preferred-height;
+        }
+    }
+
+    client-menu := PopupWindow {
+        x: root.menu-x;
+        y: root.menu-y;
+        width: 168px;
+        height: 3 * 28px + 8px;
+        Rectangle {
+            background: Theme.popup-bg;
+            border-radius: Theme.radius-sm;
+            border-width: 1px;
+            border-color: Theme.border-strong;
+            drop-shadow-blur: 10px;
+            drop-shadow-color: #00000050;
+            VerticalLayout {
+                padding: 4px;
+                spacing: 2px;
+                Rectangle {
+                    height: 28px;
+                    border-radius: Theme.radius-sm;
+                    background: rdp-ta.has-hover && root.menu-ready ? Theme.bg-hover : transparent;
+                    rdp-ta := TouchArea {
+                        enabled: root.menu-ready;
+                        mouse-cursor: root.menu-ready ? pointer : default;
+                        clicked => { client-menu.close(); root.open-client("rdp", root.menu-bind); }
+                    }
+                    Text {
+                        x: 10px;
+                        text: @tr("Remote Desktop");
+                        color: root.menu-ready ? Theme.text-primary : Theme.text-muted;
+                        font-size: Theme.fs-sm;
+                        vertical-alignment: center;
+                    }
+                }
+                Rectangle {
+                    height: 28px;
+                    border-radius: Theme.radius-sm;
+                    background: vnc-ta.has-hover && root.menu-ready ? Theme.bg-hover : transparent;
+                    vnc-ta := TouchArea {
+                        enabled: root.menu-ready;
+                        mouse-cursor: root.menu-ready ? pointer : default;
+                        clicked => { client-menu.close(); root.open-client("vnc", root.menu-bind); }
+                    }
+                    Text {
+                        x: 10px;
+                        text: @tr("VNC");
+                        color: root.menu-ready ? Theme.text-primary : Theme.text-muted;
+                        font-size: Theme.fs-sm;
+                        vertical-alignment: center;
+                    }
+                }
+                Rectangle {
+                    height: 28px;
+                    border-radius: Theme.radius-sm;
+                    background: web-ta.has-hover && root.menu-ready ? Theme.bg-hover : transparent;
+                    web-ta := TouchArea {
+                        enabled: root.menu-ready;
+                        mouse-cursor: root.menu-ready ? pointer : default;
+                        clicked => { client-menu.close(); root.open-client("browser", root.menu-bind); }
+                    }
+                    Text {
+                        x: 10px;
+                        text: @tr("Open in browser");
+                        color: root.menu-ready ? Theme.text-primary : Theme.text-muted;
+                        font-size: Theme.fs-sm;
+                        vertical-alignment: center;
                     }
                 }
             }
@@ -617,6 +713,9 @@ export component Sidebar inherits Rectangle {
     callback tunnel-start(string);
     callback tunnel-stop(string);
     callback open-tunnels();
+    callback open-tunnel-client(string, string);
+    in property <string> tunnel-client-hint;
+    in property <bool> tunnel-client-hint-error;
     in property <bool> proc-available;   // a live remote session → show the process button (#23)
     // App version string, injected from Rust (env!("CARGO_PKG_VERSION")) so it
     // always matches Cargo.toml without hand-editing this file.
@@ -691,8 +790,8 @@ export component Sidebar inherits Rectangle {
             padding-right: 10px;
             padding-top: 10px;
             spacing: 10px;
-            // Ten blank lines between the last forwarding rule and the version.
-            height: parent.height - version-label.preferred-height * 11 - 8px;
+            // Five blank lines between the last forwarding rule and the version.
+            height: parent.height - version-label.preferred-height * 6 - 8px;
             StatusBlock {
                 conn-state: root.conn-state;
                 connection-state: root.connection-state;
@@ -731,9 +830,12 @@ export component Sidebar inherits Rectangle {
                 hug-content: true;
                 tunnels: root.tunnels;
                 available: root.tunnels-available;
+                client-hint: root.tunnel-client-hint;
+                client-hint-error: root.tunnel-client-hint-error;
                 start-rule(id) => { root.tunnel-start(id); }
                 stop-rule(id) => { root.tunnel-stop(id); }
                 manage() => { root.open-tunnels(); }
+                open-client(tool, bind) => { root.open-tunnel-client(tool, bind); }
             }
         }
     }
@@ -794,9 +896,12 @@ export component Sidebar inherits Rectangle {
                 min-width: 200px;
                 tunnels: root.tunnels;
                 available: root.tunnels-available;
+                client-hint: root.tunnel-client-hint;
+                client-hint-error: root.tunnel-client-hint-error;
                 start-rule(id) => { root.tunnel-start(id); }
                 stop-rule(id) => { root.tunnel-stop(id); }
                 manage() => { root.open-tunnels(); }
+                open-client(tool, bind) => { root.open-tunnel-client(tool, bind); }
             }
         }
     }

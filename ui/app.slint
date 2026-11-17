@@ -71,8 +71,8 @@ export struct TerminalState {
     sftp-loading: bool,
     sftp-tree-nodes: [SftpTreeNode],
     sftp-selected-count: int,   // checked entries in the SFTP panel (#100)
-    sftp-sort-key: string,      // "modified" default; also name/size/... (#248)
-    sftp-sort-dir: int,         // 1 asc / -1 desc; default is modified desc
+    sftp-sort-key: string,      // "name" default; also size/modified/... (#248)
+    sftp-sort-dir: int,         // 1 asc / -1 desc; default is name ascending
     sftp-available: bool,       // false for local/serial/telnet sessions
     font-size: int,             // per-session zoom override in px (0 = follow window)
     tunnels: [TunnelInfo],      // runtime SSH tunnels (#206)
@@ -390,6 +390,9 @@ export component AppWindow inherits Window {
     callback sidebar-tunnel-start(string /* tunnel-id */);
     callback sidebar-tunnel-stop(string /* tunnel-id */);
     callback sidebar-open-tunnels();
+    callback open-tunnel-client(string /* rdp | vnc | browser */, string /* bind */);
+    in-out property <string> tunnel-client-hint;
+    in-out property <bool> tunnel-client-hint-error;
     in property <string> app-version;       // from Rust: env!("CARGO_PKG_VERSION")
     callback select-net-iface(string);
 
@@ -483,6 +486,11 @@ export component AppWindow inherits Window {
     // stay here as the live data source shared with that window (#23).
     callback open-processes();
     in-out property <bool> process-window-open: false;
+    // Process window sort and live-refresh pause. Shared with ProcWindow so a
+    // new sample keeps the column the user picked.
+    in-out property <string> proc-sort-key: "cpu";
+    in-out property <int> proc-sort-dir: -1;
+    in-out property <bool> proc-paused: false;
     in property <bool> proc-available;       // a live remote session is active
     in property <[ProcRow]> proc-list;       // top remote processes by CPU
     callback open-system-info();
@@ -1055,6 +1063,8 @@ export component AppWindow inherits Window {
     callback move-session(string /* session-id */, string /* group */);
     callback reorder-session(string /* session-id */, int /* dir: -1 up, 1 down */) -> bool;
     callback reorder-session-end();
+    callback reorder-group(string /* group */, int /* dir: -1 up, 1 down */) -> bool;
+    callback reorder-group-end();
     callback toggle-group(string /* group */);
     callback remove-session(string /* session-id */);
     callback session-dialog-submit(SessionDraft);
@@ -1184,6 +1194,7 @@ export component AppWindow inherits Window {
     callback sftp-sort-request(string /* tab-id */, string /* key */);
     callback sftp-clear-sort(string /* tab-id */);
     callback tunnel-add(string /* tab-id */, string /* name */, string /* kind */, string /* bind */, string /* bind-port */, string /* host */, string /* host-port */, bool /* save */, bool /* auto-start */);
+    callback tunnel-update(string /* tab-id */, string /* tunnel-id */, string /* name */, string /* kind */, string /* bind */, string /* bind-port */, string /* host */, string /* host-port */, bool /* save */, bool /* auto-start */);
     callback tunnel-stop(string /* tab-id */, string /* tunnel-id */);
     callback tunnel-start(string /* tab-id */, string /* tunnel-id */);
     callback tunnel-delete(string /* tab-id */, string /* tunnel-id */);
@@ -1630,6 +1641,8 @@ export component AppWindow inherits Window {
                     move-session(id, group) => { root.move-session(id, group); }
                     reorder-session(id, dir) => { return root.reorder-session(id, dir); }
                     reorder-end => { root.reorder-session-end(); }
+                    reorder-group(name, dir) => { return root.reorder-group(name, dir); }
+                    reorder-group-end => { root.reorder-group-end(); }
                     toggle-group(group) => { root.toggle-group(group); }
                     new-group => {
                         root.group-dialog-orig = "";
@@ -1768,6 +1781,9 @@ export component AppWindow inherits Window {
                 tunnel-start(id) => { root.sidebar-tunnel-start(id); }
                 tunnel-stop(id) => { root.sidebar-tunnel-stop(id); }
                 open-tunnels() => { root.sidebar-open-tunnels(); }
+                tunnel-client-hint: root.tunnel-client-hint;
+                tunnel-client-hint-error: root.tunnel-client-hint-error;
+                open-tunnel-client(tool, bind) => { root.open-tunnel-client(tool, bind); }
                 system-info-available: root.system-info-available;
                 proc-available: root.proc-available;
                 app-version: root.app-version;
@@ -1992,6 +2008,8 @@ export component AppWindow inherits Window {
                         move-session(id, group) => { root.move-session(id, group); }
                         reorder-session(id, dir) => { return root.reorder-session(id, dir); }
                         reorder-end => { root.reorder-session-end(); }
+                    reorder-group(name, dir) => { return root.reorder-group(name, dir); }
+                    reorder-group-end => { root.reorder-group-end(); }
                         toggle-group(group) => { root.toggle-group(group); }
                         new-group => {
                             root.group-dialog-orig = "";
@@ -2166,9 +2184,15 @@ export component AppWindow inherits Window {
                         tunnel-add(name, kind, bind, bind-port, host, host-port, save, auto-start) => {
                             root.tunnel-add(term.id, name, kind, bind, bind-port, host, host-port, save, auto-start);
                         }
+                        tunnel-update(id, name, kind, bind, bind-port, host, host-port, save, auto-start) => {
+                            root.tunnel-update(term.id, id, name, kind, bind, bind-port, host, host-port, save, auto-start);
+                        }
                         tunnel-stop(id) => { root.tunnel-stop(term.id, id); }
                         tunnel-start(id) => { root.tunnel-start(term.id, id); }
                         tunnel-delete(id) => { root.tunnel-delete(term.id, id); }
+                        tunnel-client-hint: root.tunnel-client-hint;
+                        tunnel-client-hint-error: root.tunnel-client-hint-error;
+                        tunnel-open-client(tool, bind) => { root.open-tunnel-client(tool, bind); }
                         // #69 context-menu extensions → shared prompt dialog.
                         sftp-rename-request(path, name) => {
                             root.sftp-prompt-kind = "rename";
@@ -2421,6 +2445,9 @@ export component AppWindow inherits Window {
                     tunnel-start(id) => { root.sidebar-tunnel-start(id); }
                     tunnel-stop(id) => { root.sidebar-tunnel-stop(id); }
                     open-tunnels() => { root.sidebar-open-tunnels(); }
+                    tunnel-client-hint: root.tunnel-client-hint;
+                    tunnel-client-hint-error: root.tunnel-client-hint-error;
+                    open-tunnel-client(tool, bind) => { root.open-tunnel-client(tool, bind); }
                     system-info-available: root.system-info-available;
                     proc-available: root.proc-available;
                     app-version: root.app-version;
@@ -2495,6 +2522,8 @@ export component AppWindow inherits Window {
                     move-session(id, group) => { root.move-session(id, group); }
                     reorder-session(id, dir) => { return root.reorder-session(id, dir); }
                     reorder-end => { root.reorder-session-end(); }
+                    reorder-group(name, dir) => { return root.reorder-group(name, dir); }
+                    reorder-group-end => { root.reorder-group-end(); }
                     toggle-group(group) => { root.toggle-group(group); }
                     new-group => {
                         root.group-dialog-orig = "";

@@ -685,6 +685,61 @@ pub(super) fn wire_session_callbacks(
             }
         });
     }
+    {
+        let weak = window.as_weak();
+        let store = store.clone();
+        let sessions_model = sessions_model.clone();
+        let registry = registry.clone();
+        let sessions_dirty = sessions_dirty.clone();
+        window.on_reorder_group(move |name: SharedString, dir: i32| {
+            if weak
+                .upgrade()
+                .map(|window| !window.get_host_search_query().trim().is_empty())
+                .unwrap_or(false)
+            {
+                return false;
+            }
+            let moved = {
+                let mut s = store.borrow_mut();
+                s.reorder_group(name.as_str(), dir as isize)
+            };
+            if moved {
+                sessions_dirty.set(true);
+                let query = weak
+                    .upgrade()
+                    .map(|w| w.get_host_search_query().to_string())
+                    .unwrap_or_default();
+                let in_place =
+                    refresh_session_rows_in_place(&store.borrow(), &sessions_model, &query);
+                if !in_place {
+                    sessions_dirty.set(false);
+                    if let Err(err) = store.borrow_mut().save() {
+                        tracing::warn!("failed to save config: {err:#}");
+                    }
+                    sync_sessions_for_window(&weak, &store.borrow(), &sessions_model);
+                    registry.broadcast_config_changed();
+                }
+            }
+            moved
+        });
+    }
+    {
+        let weak = window.as_weak();
+        let store = store.clone();
+        let sessions_model = sessions_model.clone();
+        let registry = registry.clone();
+        let sessions_dirty = sessions_dirty.clone();
+        window.on_reorder_group_end(move || {
+            if !sessions_dirty.replace(false) {
+                return;
+            }
+            if let Err(err) = store.borrow_mut().save() {
+                tracing::warn!("failed to save config: {err:#}");
+            }
+            sync_sessions_for_window(&weak, &store.borrow(), &sessions_model);
+            registry.broadcast_config_changed();
+        });
+    }
 
     // Collapse / expand a group in the welcome list (#41). Toggling flips the
     // `collapsed` flag on every row of that group in place — no full re-sync —
@@ -1354,8 +1409,8 @@ pub(super) fn wire_session_callbacks(
                     VecModel::<SftpTreeNode>::default(),
                 )),
                 sftp_selected_count: 0,
-                sftp_sort_key: "modified".into(),
-                sftp_sort_dir: -1,
+                sftp_sort_key: super::sftp_ui::SFTP_DEFAULT_SORT_KEY.into(),
+                sftp_sort_dir: super::sftp_ui::SFTP_DEFAULT_SORT_DIR,
                 sftp_available: has_sftp,
                 font_size: 0,
                 tunnels: ModelRc::from(std::rc::Rc::new(VecModel::<TunnelInfo>::default())),

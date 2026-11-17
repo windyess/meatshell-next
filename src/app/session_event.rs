@@ -208,6 +208,18 @@ pub(super) fn apply_session_event_to_window(
                     },
                     status: r.status.into(),
                     active: r.active,
+                    rule_name: r.rule_name.into(),
+                    bind_addr: r.bind_addr.into(),
+                    listen_port: r.bind_port.to_string().into(),
+                    target_host: r.host.into(),
+                    target_port: if r.host_port == 0 {
+                        "".into()
+                    } else {
+                        r.host_port.to_string().into()
+                    },
+                    auto_start: r.auto_start,
+                    saved: r.saved,
+                    failed: r.failed,
                 })
                 .collect::<Vec<_>>();
             update_terminal(&|t| {
@@ -215,6 +227,12 @@ pub(super) fn apply_session_event_to_window(
             });
             if win.get_active_tab_id().as_str() == tab_id {
                 sync_sidebar_tunnels(win);
+            }
+        }
+        SessionEvent::TunnelNotice { error, message } => {
+            if win.get_active_tab_id().as_str() == tab_id {
+                win.set_tunnel_client_hint_error(error);
+                win.set_tunnel_client_hint(message.into());
             }
         }
 

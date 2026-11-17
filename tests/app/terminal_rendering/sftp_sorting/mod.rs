@@ -48,7 +48,7 @@ fn sftp_name_sort_uses_natural_numeric_order() {
 }
 
 #[test]
-fn sftp_default_sort_is_newest_modified_first() {
+fn sftp_default_sort_is_name_ascending_with_directories_first() {
     let mut entries = vec![
         {
             let mut e = sftp_entry("old-dir", true);
@@ -69,7 +69,7 @@ fn sftp_default_sort_is_newest_modified_first() {
     sort_sftp_entries(&mut entries, "", 0);
     assert_eq!(
         sftp_names(&entries),
-        vec!["new-file", "mid-file", "old-dir"]
+        vec!["old-dir", "mid-file", "new-file"]
     );
 }
 

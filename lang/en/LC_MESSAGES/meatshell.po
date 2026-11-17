@@ -573,6 +573,18 @@ msgstr "Terminate process"
 msgid "PID copied"
 msgstr "PID copied"
 
+msgid "Pause refresh"
+msgstr "Pause refresh"
+
+msgid "Resume refresh"
+msgstr "Resume refresh"
+
+msgid "Refresh paused"
+msgstr "Refresh paused"
+
+msgid "Refreshing every second"
+msgstr "Refreshing every second"
+
 msgid "Terminate this process? It may lose unsaved data."
 msgstr "Terminate this process? It may lose unsaved data."
 
@@ -741,6 +753,15 @@ msgstr "SSH session required"
 
 msgid "No forwarding rules"
 msgstr "No forwarding rules"
+
+msgid "Remote Desktop"
+msgstr "Remote Desktop"
+
+msgid "VNC"
+msgstr "VNC"
+
+msgid "Open in browser"
+msgstr "Open in browser"
 
 msgid "Local listen address"
 msgstr "Local listen address"

@@ -403,6 +403,9 @@ export component Welcome inherits Rectangle {
     callback reorder-session(string /* id */, int /* dir */) -> bool;
     // Drag finished (pointer released) → persist the new order.
     callback reorder-end();
+    // Drag a folder header among the other folders. `system` stays pinned.
+    callback reorder-group(string /* group */, int /* dir */) -> bool;
+    callback reorder-group-end();
     // Bumped by Rust whenever the sessions model is rebuilt wholesale; that
     // destroys the dragging row's pointer grab, so end the drag cleanly
     // instead of leaving the lifted card stuck (its grab is already gone —
@@ -414,12 +417,17 @@ export component Welcome inherits Rectangle {
             root.drag-id = "";
             root.reorder-end();
         }
+        if (root.drag-group != "") {
+            root.drag-group = "";
+            root.reorder-group-end();
+        }
     }
     // List-level drag-to-reorder state: which session is being dragged.
     // Kept at list level because hops swap row data under the pointer grab —
     // the lifted card must follow the dragged session's data, not the
     // component that owns the grab.
     property <string> drag-id;
+    property <string> drag-group;
     property <bool> list-dragging: false;
     callback toggle-group(string /* group */);
     callback new-group();
@@ -708,25 +716,33 @@ export component Welcome inherits Rectangle {
                     viewport-height: max(self.visible-height, sess-list.preferred-height);
                     sess-list := VerticalLayout {
                     spacing: 0px;
-                    for session[i] in sessions : VerticalLayout {
+                    for session[i] in sessions : row-wrap := Rectangle {
                         // Exclude hidden rows from layout spacing while a group
                         // is collapsed; keep its first row for the group header.
                         visible: session.group-header != "" || !session.collapsed;
+                        height: row-body.preferred-height;
+                        // Gesture state lives on the row, not the header. A hop
+                        // swaps which row is the header, and the header `if`
+                        // would otherwise drop the pointer grab after one move.
+                        property <bool> g-pressing: false;
+                        property <bool> g-dragging: false;
+                        property <length> g-grab-y: 0px;
+                        property <length> gmx;
+                        property <length> gmy;
+                        row-body := VerticalLayout {
                         padding-top: 0px;
                         spacing: 0px;
                         // Group header on the first row of each group (#41).
                         // Click anywhere on it to collapse / expand the group.
                         if session.group-header != "" : Rectangle {
                             height: 30px;
+                            background: root.drag-group == session.group ? Theme.bg-hover : transparent;
                             Rectangle {
                                 y: parent.height - 1px;
                                 height: 1px;
                                 width: parent.width;
                                 background: Theme.row-rule;
                             }
-                            // Right-click popup anchor.
-                            property <length> gmx;
-                            property <length> gmy;
                             HorizontalLayout {
                                 padding-top: 6px;
                                 padding-left: 4px;
@@ -758,78 +774,6 @@ export component Welcome inherits Rectangle {
                                     horizontal-alignment: left;
                                 }
                             }
-                            TouchArea {
-                                mouse-cursor: pointer;
-                                // Left-click toggles collapse (any group, incl.
-                                // empty); right-click opens the group menu.
-                                clicked => {
-                                    if root.search-query == "" {
-                                        root.toggle-group(session.group);
-                                    }
-                                }
-                                pointer-event(e) => {
-                                    if (!session.builtin && e.kind == PointerEventKind.down && e.button == PointerEventButton.right) {
-                                        gmx = self.mouse-x;
-                                        gmy = self.mouse-y;
-                                        grp-menu.show();
-                                    }
-                                }
-                            }
-                            grp-menu := PopupWindow {
-                                x: gmx;
-                                y: gmy;
-                                width: 140px;
-                                // edit + new always; delete only for an empty group.
-                                height: (session.id == "" ? 3 : 2) * 28px + 9px;
-                                Rectangle {
-                                    background: Theme.popup-bg;
-                                    border-radius: Theme.radius-sm;
-                                    border-width: 1px;
-                                    border-color: Theme.border-strong;
-                                    drop-shadow-blur: 10px;
-                                    drop-shadow-color: #00000050;
-                                    VerticalLayout {
-                                        padding: 4px;
-                                        spacing: 1px;
-                                        // Edit (rename) group
-                                        Rectangle {
-                                            height: 28px;
-                                            border-radius: Theme.radius-sm;
-                                            background: eg-ta.has-hover ? Theme.bg-hover : transparent;
-                                            eg-ta := TouchArea { mouse-cursor: pointer; clicked => { root.edit-group(session.group); } }
-                                            HorizontalLayout {
-                                                padding-left: 10px; spacing: 8px;
-                                                Text { text: "\u{E3C9}"; font-family: "Material Icons"; color: Theme.text-secondary; font-size: Theme.fs-sm; vertical-alignment: center; }
-                                                Text { text: @tr("Edit group"); color: Theme.text-primary; font-size: Theme.fs-md; vertical-alignment: center; horizontal-stretch: 1; }
-                                            }
-                                        }
-                                        // Delete group — only when it has no sessions (id == "")
-                                        if session.id == "" : Rectangle {
-                                            height: 28px;
-                                            border-radius: Theme.radius-sm;
-                                            background: dg-ta.has-hover ? #cc333320 : transparent;
-                                            dg-ta := TouchArea { mouse-cursor: pointer; clicked => { root.delete-group(session.group); } }
-                                            HorizontalLayout {
-                                                padding-left: 10px; spacing: 8px;
-                                                Text { text: "\u{E872}"; font-family: "Material Icons"; color: #cc3333; font-size: Theme.fs-sm; vertical-alignment: center; }
-                                                Text { text: @tr("Delete group"); color: #cc3333; font-size: Theme.fs-md; vertical-alignment: center; horizontal-stretch: 1; }
-                                            }
-                                        }
-                                        // New group
-                                        Rectangle {
-                                            height: 28px;
-                                            border-radius: Theme.radius-sm;
-                                            background: ng-ta.has-hover ? Theme.bg-hover : transparent;
-                                            ng-ta := TouchArea { mouse-cursor: pointer; clicked => { root.new-group(); } }
-                                            HorizontalLayout {
-                                                padding-left: 10px; spacing: 8px;
-                                                Text { text: "\u{E2CC}"; font-family: "Material Icons"; color: Theme.text-secondary; font-size: Theme.fs-sm; vertical-alignment: center; }
-                                                Text { text: @tr("New group"); color: Theme.text-primary; font-size: Theme.fs-md; vertical-alignment: center; horizontal-stretch: 1; }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
                         }
                         if session.id != "" && !session.collapsed : SessionRow {
                             session: session;
@@ -854,6 +798,109 @@ export component Welcome inherits Rectangle {
                                 root.reorder-end();
                             }
                             remove => { root.remove-session(session.id); }
+                        }
+                        }
+                        // Covers the header without taking layout space. Stays
+                        // alive after a hop moves the header to another row, so
+                        // the pointer grab survives the reorder.
+                        g-touch := TouchArea {
+                            y: 0px;
+                            width: parent.width;
+                            height: (session.group-header != "" || row-wrap.g-dragging) ? 30px : 0px;
+                            mouse-cursor: row-wrap.g-dragging ? move : pointer;
+                            pointer-event(e) => {
+                                if (!session.builtin && e.kind == PointerEventKind.down && e.button == PointerEventButton.right && session.group-header != "") {
+                                    row-wrap.gmx = self.mouse-x;
+                                    row-wrap.gmy = self.mouse-y;
+                                    grp-menu.show();
+                                } else if (e.button == PointerEventButton.left) {
+                                    if (e.kind == PointerEventKind.down && session.group-header != "") {
+                                        row-wrap.g-pressing = true;
+                                        row-wrap.g-dragging = false;
+                                        row-wrap.g-grab-y = self.mouse-y;
+                                    } else if (e.kind == PointerEventKind.up || e.kind == PointerEventKind.cancel) {
+                                        if (row-wrap.g-pressing && !row-wrap.g-dragging && root.search-query == "" && e.kind == PointerEventKind.up) {
+                                            root.toggle-group(session.group);
+                                        }
+                                        if (row-wrap.g-dragging) {
+                                            root.drag-group = "";
+                                            root.reorder-group-end();
+                                        }
+                                        row-wrap.g-pressing = false;
+                                        row-wrap.g-dragging = false;
+                                    }
+                                }
+                            }
+                            moved => {
+                                if (!row-wrap.g-pressing) { return; }
+                                if (!row-wrap.g-dragging) {
+                                    if (root.search-query != "" || session.builtin) { return; }
+                                    if (abs(g-touch.mouse-y - row-wrap.g-grab-y) > 5px) {
+                                        row-wrap.g-dragging = true;
+                                        row-wrap.g-grab-y = g-touch.mouse-y;
+                                        root.drag-group = session.group;
+                                    }
+                                } else if (g-touch.mouse-y - row-wrap.g-grab-y > 18px) {
+                                    if (root.reorder-group(root.drag-group, 1)) {
+                                        row-wrap.g-grab-y = row-wrap.g-grab-y + 36px;
+                                    }
+                                } else if (row-wrap.g-grab-y - g-touch.mouse-y > 18px) {
+                                    if (root.reorder-group(root.drag-group, -1)) {
+                                        row-wrap.g-grab-y = row-wrap.g-grab-y - 36px;
+                                    }
+                                }
+                            }
+                        }
+                        grp-menu := PopupWindow {
+                            x: row-wrap.gmx;
+                            y: row-wrap.gmy;
+                            width: 140px;
+                            height: (session.id == "" ? 3 : 2) * 28px + 9px;
+                            Rectangle {
+                                background: Theme.popup-bg;
+                                border-radius: Theme.radius-sm;
+                                border-width: 1px;
+                                border-color: Theme.border-strong;
+                                drop-shadow-blur: 10px;
+                                drop-shadow-color: #00000050;
+                                VerticalLayout {
+                                    padding: 4px;
+                                    spacing: 1px;
+                                    Rectangle {
+                                        height: 28px;
+                                        border-radius: Theme.radius-sm;
+                                        background: eg-ta.has-hover ? Theme.bg-hover : transparent;
+                                        eg-ta := TouchArea { mouse-cursor: pointer; clicked => { root.edit-group(session.group); } }
+                                        HorizontalLayout {
+                                            padding-left: 10px; spacing: 8px;
+                                            Text { text: "\u{E3C9}"; font-family: "Material Icons"; color: Theme.text-secondary; font-size: Theme.fs-sm; vertical-alignment: center; }
+                                            Text { text: @tr("Edit group"); color: Theme.text-primary; font-size: Theme.fs-md; vertical-alignment: center; horizontal-stretch: 1; }
+                                        }
+                                    }
+                                    if session.id == "" : Rectangle {
+                                        height: 28px;
+                                        border-radius: Theme.radius-sm;
+                                        background: dg-ta.has-hover ? #cc333320 : transparent;
+                                        dg-ta := TouchArea { mouse-cursor: pointer; clicked => { root.delete-group(session.group); } }
+                                        HorizontalLayout {
+                                            padding-left: 10px; spacing: 8px;
+                                            Text { text: "\u{E872}"; font-family: "Material Icons"; color: #cc3333; font-size: Theme.fs-sm; vertical-alignment: center; }
+                                            Text { text: @tr("Delete group"); color: #cc3333; font-size: Theme.fs-md; vertical-alignment: center; horizontal-stretch: 1; }
+                                        }
+                                    }
+                                    Rectangle {
+                                        height: 28px;
+                                        border-radius: Theme.radius-sm;
+                                        background: ng-ta.has-hover ? Theme.bg-hover : transparent;
+                                        ng-ta := TouchArea { mouse-cursor: pointer; clicked => { root.new-group(); } }
+                                        HorizontalLayout {
+                                            padding-left: 10px; spacing: 8px;
+                                            Text { text: "\u{E2CC}"; font-family: "Material Icons"; color: Theme.text-secondary; font-size: Theme.fs-sm; vertical-alignment: center; }
+                                            Text { text: @tr("New group"); color: Theme.text-primary; font-size: Theme.fs-md; vertical-alignment: center; horizontal-stretch: 1; }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                     }

@@ -475,9 +475,9 @@ pub(super) fn wire_sftp_callbacks(
                 } else if row.sftp_sort_dir > 0 {
                     (cur_key, -1)
                 } else if cur_key == SFTP_DEFAULT_SORT_KEY {
-                    // Default is already modified/newest-first; the other click
-                    // is oldest-first.
-                    (cur_key, 1)
+                    // Name is the default and is already descending; the other
+                    // click returns to A-to-Z.
+                    (cur_key, SFTP_DEFAULT_SORT_DIR)
                 } else {
                     (
                         SFTP_DEFAULT_SORT_KEY.to_string(),

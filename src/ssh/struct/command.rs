@@ -18,6 +18,13 @@ pub enum SessionCommand {
     StartTunnel(String),
     /// Remove a tunnel row after cancelling its listener.
     DeleteTunnel(String),
+    /// Replace a tunnel's settings. Restarts it when it was running.
+    /// `saved` is whether the rule remains stored on the SSH session.
+    UpdateTunnel {
+        id: String,
+        forward: crate::config::PortForward,
+        saved: bool,
+    },
     /// Terminate one remote process on a short-lived exec channel. Supplying a
     /// password selects the privileged `sudo -S` path; the secret is never
     /// written to the interactive PTY or shell history.

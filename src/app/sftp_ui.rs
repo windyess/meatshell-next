@@ -106,9 +106,9 @@ pub(super) fn sorted_sftp_entries_from_model(
     ModelRc::from(std::rc::Rc::new(VecModel::from(entries)))
 }
 
-/// Default file list: modification time, newest on the first row.
-pub(super) const SFTP_DEFAULT_SORT_KEY: &str = "modified";
-pub(super) const SFTP_DEFAULT_SORT_DIR: i32 = -1;
+/// Default file list: name, A to Z, directories first.
+pub(super) const SFTP_DEFAULT_SORT_KEY: &str = "name";
+pub(super) const SFTP_DEFAULT_SORT_DIR: i32 = 1;
 
 pub(super) fn sort_sftp_entries(entries: &mut [SftpEntry], key: &str, dir: i32) {
     use std::cmp::Ordering;

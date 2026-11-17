@@ -160,6 +160,7 @@ async fn run_local(
             | SessionCommand::StopTunnel(_)
             | SessionCommand::StartTunnel(_)
             | SessionCommand::DeleteTunnel(_)
+            | SessionCommand::UpdateTunnel { .. }
             | SessionCommand::SetResourceMonitoring(_) => {}
             SessionCommand::KillProcess { reply, .. } => {
                 let _ = reply.send(crate::ssh::ProcessKillResult {

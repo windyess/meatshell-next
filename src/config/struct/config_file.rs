@@ -174,6 +174,10 @@ pub struct ConfigFile {
     /// `Some([])` means the user explicitly expanded every folder.
     #[serde(default)]
     pub collapsed_session_groups: Option<Vec<String>>,
+    /// Manual Quick Connect folder order. Includes `"default"` once that
+    /// folder has been dragged. `None` keeps ungrouped first, then A→Z.
+    #[serde(default)]
+    pub session_group_order: Option<Vec<String>>,
     /// Stored inverted ("don't follow") so both serde and the Default derive
     /// yield `false` = the feature defaults to ON: the SFTP panel follows the
     /// terminal's cd (OSC 7) unless the user opts out in Interface settings.

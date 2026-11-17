@@ -94,6 +94,8 @@ pub enum SessionEvent {
 
     /// Runtime tunnel state changed (#206).
     TunnelUpdate(Vec<RuntimeTunnelInfo>),
+    /// Shown under the tunnel list. An empty message clears it.
+    TunnelNotice { error: bool, message: String },
 
     // --- SFTP events -------------------------------------------------------
     /// The shell's current working directory changed (parsed from OSC 7).
@@ -172,6 +174,12 @@ impl SessionHandle {
 
     pub fn delete_tunnel(&self, id: String) {
         let _ = self.commands.send(SessionCommand::DeleteTunnel(id));
+    }
+
+    pub fn update_tunnel(&self, id: String, forward: PortForward, saved: bool) {
+        let _ = self
+            .commands
+            .send(SessionCommand::UpdateTunnel { id, forward, saved });
     }
 
     pub fn kill_process(
