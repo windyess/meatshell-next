@@ -322,6 +322,14 @@ export component TerminalView inherits Rectangle {
     in-out property <string> sftp-dock: "bottom";
     in-out property <string> sftp-panel-mode: "files";
     in property <int> open-tunnels-seq: 0;
+    in property <string> sftp-reveal-tab: "";
+    in property <int> sftp-reveal-seq: 0;
+    changed sftp-reveal-seq => {
+        if (root.sftp-reveal-seq > 0 && root.sftp-reveal-tab == root.tab-id && root.sftp-available) {
+            root.sftp-panel-mode = "files";
+            root.set-sftp-collapsed(false);
+        }
+    }
     changed open-tunnels-seq => {
         if (root.active && root.open-tunnels-seq > 0 && root.sftp-available) {
             root.sftp-panel-mode = "tunnels";
@@ -936,11 +944,15 @@ export component TerminalView inherits Rectangle {
                             // it so a glyph whose advance differs from 2×cell-w can't
                             // bleed over the neighbouring cell / cursor (#60 follow-up).
                             clip: span.cjk;
-                            // Auto-sized Text (no width/height bindings) so its
-                            // layout never re-enters parley's FontContext.
+                            // Size comes from the cell box, not this Text's
+                            // preferred-width: reading preferred-width while a
+                            // Text is being shaped re-enters FontContext.
                             if !span.emoji : Text {
                                 x: 0px;
                                 y: 0px;
+                                width: parent.width;
+                                height: parent.height;
+                                vertical-alignment: center;
                                 text: span.text;
                                 color: span.fg;
                                 // CJK spans use the CJK-capable UI font: the mono

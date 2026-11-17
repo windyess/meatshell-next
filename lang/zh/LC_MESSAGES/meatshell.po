@@ -570,6 +570,9 @@ msgstr "清除排序"
 msgid "Terminate process"
 msgstr "结束进程"
 
+msgid "Open in SFTP"
+msgstr "在 SFTP 中打开"
+
 msgid "PID copied"
 msgstr "已复制 PID"
 

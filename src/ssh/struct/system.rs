@@ -5,7 +5,10 @@ pub struct ProcInfo {
     pub pid: u32,
     pub user: String,
     pub cpu: f32,
+    /// Resident share of total memory, percent.
     pub mem: f32,
+    /// Resident set size in KiB. `0` when the sample only had a percent.
+    pub rss_kib: u64,
     pub command: String,
 }
 

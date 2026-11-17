@@ -64,8 +64,9 @@ pub(super) fn proc_rows(procs: &[ProcInfo], current_user: &str, tab_id: &str) ->
             pid: p.pid.to_string().into(),
             user: p.user.clone().into(),
             cpu: format!("{:.1}", p.cpu).into(),
-            mem: format!("{:.1}", p.mem).into(),
+            mem: format_proc_mem(p.mem, p.rss_kib).into(),
             command: p.command.clone().into(),
+            sftp_path: sftp_dir_from_command(&p.command).into(),
             cpu_frac: (p.cpu / 100.0).clamp(0.0, 1.0),
             mem_frac: (p.mem / 100.0).clamp(0.0, 1.0),
             own_process: !process_needs_root(current_user, &p.user),
@@ -144,7 +145,50 @@ pub(super) fn resort_process_model(win: &AppWindow) {
 }
 
 fn proc_text_num(text: &str) -> f32 {
-    text.parse().unwrap_or(0.0)
+    let end = text
+        .find(|c: char| !(c.is_ascii_digit() || c == '.' || c == '-'))
+        .unwrap_or(text.len());
+    text[..end].parse().unwrap_or(0.0)
+}
+
+/// Percent, and the resident size when the sample included it.
+fn format_proc_mem(percent: f32, rss_kib: u64) -> String {
+    if rss_kib == 0 {
+        format!("{percent:.1}%")
+    } else {
+        format!(
+            "{percent:.1}%  {}",
+            crate::ssh::format_size(rss_kib.saturating_mul(1024))
+        )
+    }
+}
+
+/// Directory an SFTP panel should open for a process command line.
+/// The last absolute path is preferred (a data file over `/usr/bin/...`).
+/// A path without a trailing slash is treated as a file, so its parent is used.
+pub(super) fn sftp_dir_from_command(command: &str) -> String {
+    let mut found: Option<String> = None;
+    for token in command.split_whitespace() {
+        let token = token.trim_matches(|c: char| matches!(c, '"' | '\'' | ',' | ';' | ':' | ')' | '('));
+        if token.starts_with('/') && token != "/" {
+            found = Some(token.to_string());
+        }
+    }
+    let Some(path) = found else {
+        return String::new();
+    };
+    if path.ends_with('/') {
+        let trimmed = path.trim_end_matches('/');
+        return if trimmed.is_empty() {
+            "/".to_string()
+        } else {
+            trimmed.to_string()
+        };
+    }
+    match path.rfind('/') {
+        Some(0) | None => "/".to_string(),
+        Some(index) => path[..index].to_string(),
+    }
 }
 
 fn proc_row_order(a: &ProcRow, b: &ProcRow, sort_key: &str, sort_dir: i32) -> std::cmp::Ordering {

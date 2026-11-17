@@ -17,8 +17,9 @@ export struct ProcRow {
     pid: string,
     user: string,
     cpu: string,       // "12.3" (percent, one decimal)
-    mem: string,       // "4.5"
+    mem: string,       // "4.5%  128.0 MB"
     command: string,   // truncated args
+    sftp-path: string, // directory to open, empty when the command has no path
     cpu-frac: float,   // 0.0..1.0, drives the row load bar
     mem-frac: float,   // 0.0..1.0, memory bar when sorting by memory
     own-process: bool, // may terminate without root authentication
@@ -26,17 +27,24 @@ export struct ProcRow {
 
 component ProcMenuItem inherits Rectangle {
     in property <string> label;
+    in property <bool> danger: false;
     callback clicked();
     height: 30px;
     border-radius: Theme.radius-sm;
     background: menu-touch.has-hover ? Theme.bg-hover : transparent;
     menu-touch := TouchArea {
         mouse-cursor: pointer;
-        clicked => { root.clicked(); }
+        // Fire on press. A release can land after the popup has already closed
+        // and then `clicked` never runs.
+        pointer-event(e) => {
+            if (e.kind == PointerEventKind.down && e.button == PointerEventButton.left) {
+                root.clicked();
+            }
+        }
     }
     Text {
         text: root.label;
-        color: Theme.danger;
+        color: root.danger ? Theme.danger : Theme.text-primary;
         font-size: Theme.fs-sm;
         vertical-alignment: center;
         x: 10px;
@@ -136,6 +144,7 @@ export component ProcWindow inherits Window {
     property <string> selected-tab-id;
     property <string> selected-user;
     property <string> selected-command;
+    property <string> selected-path;
     property <bool> selected-own-process;
     property <bool> terminate-dialog-open;
     property <bool> terminate-dialog-pending;
@@ -148,6 +157,7 @@ export component ProcWindow inherits Window {
     callback win-resize-se();     // start an OS resize from the bottom-right grip
     callback copy-pid(string);
     callback terminate-process(string /* tab id */, string /* pid */, string /* root password, empty for own process */);
+    callback open-in-sftp(string /* tab id */, string /* directory */);
 
     // Create the confirmation dialog only after the context-menu click event
     // has fully completed, preventing pointer-up fall-through on any backend.
@@ -314,7 +324,7 @@ export component ProcWindow inherits Window {
                 ProcHeader { label: "PID"; col-width: 64px; active: root.sort-key == "pid"; dir: root.sort-dir; clicked => { root.sort-by("pid"); } }
                 ProcHeader { label: @tr("User"); col-width: 84px; active: root.sort-key == "user"; dir: root.sort-dir; clicked => { root.sort-by("user"); } }
                 ProcHeader { label: "CPU%"; col-width: 64px; align-right: true; active: root.sort-key == "cpu"; dir: root.sort-dir; clicked => { root.sort-by("cpu"); } }
-                ProcHeader { label: "MEM%"; col-width: 64px; align-right: true; active: root.sort-key == "mem"; dir: root.sort-dir; clicked => { root.sort-by("mem"); } }
+                ProcHeader { label: "MEM%"; col-width: 132px; align-right: true; active: root.sort-key == "mem"; dir: root.sort-dir; clicked => { root.sort-by("mem"); } }
                 ProcHeader { label: @tr("Command"); stretch: true; active: root.sort-key == "command"; dir: root.sort-dir; clicked => { root.sort-by("command"); } }
             }
 
@@ -355,6 +365,7 @@ export component ProcWindow inherits Window {
                                     root.selected-tab-id = p.tab-id;
                                     root.selected-user = p.user;
                                     root.selected-command = p.command;
+                                    root.selected-path = p.sftp-path;
                                     root.selected-own-process = p.own-process;
                                     root.menu-x = self.absolute-position.x - root.absolute-position.x + self.mouse-x;
                                     root.menu-y = self.absolute-position.y - root.absolute-position.y + self.mouse-y;
@@ -394,9 +405,9 @@ export component ProcWindow inherits Window {
                             Text { text: p.cpu; width: 64px; color: root.sort-key == "cpu" ? Theme.text-primary : Theme.text-secondary;
                                    font-size: Theme.fs-xs; vertical-alignment: center;
                                    horizontal-alignment: right; }
-                            Text { text: p.mem; width: 64px; color: root.sort-key == "mem" ? Theme.text-primary : Theme.text-secondary;
+                            Text { text: p.mem; width: 132px; color: root.sort-key == "mem" ? Theme.text-primary : Theme.text-secondary;
                                    font-size: Theme.fs-xs; vertical-alignment: center;
-                                   horizontal-alignment: right; }
+                                   horizontal-alignment: right; overflow: elide; }
                             Text { text: p.command; horizontal-stretch: 1; color: Theme.text-muted;
                                    font-size: Theme.fs-xs; vertical-alignment: center; overflow: elide; }
                         }
@@ -409,8 +420,8 @@ export component ProcWindow inherits Window {
     proc-menu := PopupWindow {
         x: min(root.menu-x, root.width - self.width - 8px);
         y: min(root.menu-y, root.height - self.height - 8px);
-        width: 150px;
-        height: 42px;
+        width: 230px;
+        height: (root.selected-path == "" ? 1 : 2) * 30px + 12px;
         Rectangle {
             background: Theme.popup-bg;
             border-radius: Theme.radius-sm;
@@ -420,12 +431,22 @@ export component ProcWindow inherits Window {
             drop-shadow-color: #00000070;
             VerticalLayout {
                 padding: 6px;
-                ProcMenuItem {
-                    label: @tr("Terminate process");
+                if root.selected-path != "" : ProcMenuItem {
+                    label: @tr("Open in SFTP") + "  " + root.selected-pid;
                     clicked => {
+                        // Send before close. Closing the popup can drop the
+                        // rest of this handler, so the terminal never sees cd.
+                        root.open-in-sftp(root.selected-tab-id, root.selected-path);
                         proc-menu.close();
+                    }
+                }
+                ProcMenuItem {
+                    label: @tr("Terminate process") + "  " + root.selected-pid;
+                    danger: true;
+                    clicked => {
                         root.root-password = "";
                         root.terminate-dialog-pending = true;
+                        proc-menu.close();
                     }
                 }
             }
@@ -444,7 +465,7 @@ export component ProcWindow inherits Window {
         background: #000000aa;
         dismiss-on-backdrop: !root.action-busy;
         Rectangle {
-            width: 420px;
+            width: 480px;
             height: terminate-card.preferred-height;
             x: (parent.width - self.width) / 2;
             y: (parent.height - self.height) / 2;
@@ -460,7 +481,7 @@ export component ProcWindow inherits Window {
                 padding: 20px;
                 spacing: 12px;
                 Text {
-                    text: @tr("Terminate process");
+                    text: @tr("Terminate process") + "  " + root.selected-pid;
                     color: Theme.text-primary;
                     font-size: Theme.fs-xl;
                     font-weight: 600;
@@ -473,18 +494,29 @@ export component ProcWindow inherits Window {
                     font-size: Theme.fs-md;
                     wrap: word-wrap;
                 }
-                Text {
-                    text: "PID " + root.selected-pid + "  ·  " + root.selected-user;
-                    color: Theme.text-primary;
-                    font-family: Theme.font-mono;
-                    font-size: Theme.fs-sm;
-                }
-                Text {
-                    text: root.selected-command;
-                    color: Theme.text-muted;
-                    font-family: Theme.font-mono;
-                    font-size: Theme.fs-xs;
-                    overflow: elide;
+                Rectangle {
+                    background: Theme.bg-elevated;
+                    border-radius: Theme.radius-sm;
+                    border-width: 1px;
+                    border-color: Theme.border-subtle;
+                    VerticalLayout {
+                        padding: 10px;
+                        spacing: 6px;
+                        Text {
+                            text: "PID " + root.selected-pid + "  ·  " + root.selected-user;
+                            color: Theme.text-primary;
+                            font-family: Theme.font-mono;
+                            font-size: Theme.fs-md;
+                            font-weight: 600;
+                        }
+                        Text {
+                            text: root.selected-command;
+                            color: Theme.text-primary;
+                            font-family: Theme.font-mono;
+                            font-size: Theme.fs-sm;
+                            wrap: word-wrap;
+                        }
+                    }
                 }
                 if !root.selected-own-process : LabeledInput {
                     label: @tr("Administrator password");

@@ -29,6 +29,27 @@ pub(super) struct WinCtx {
     pub(super) window_size_tracking_ready: Rc<Cell<bool>>,
 }
 
+/// Opening the SFTP panel resizes the terminal. The resize callback waits 150ms
+/// before telling the remote, and bash then redraws the current line. A `cd`
+/// sent in that window is swallowed into the redraw: the prompt text updates,
+/// the cursor stays where the shorter prompt ended, and the typed command only
+/// appears when the next Enter forces a full redisplay. Wait out the resize,
+/// then paint the echo a few times so it shows without a keypress.
+const INJECTED_CD_DELAY: std::time::Duration = std::time::Duration::from_millis(220);
+
+fn paint_terminal_after_inject(weak: slint::Weak<AppWindow>, bufs: TermBuffers, tab_id: String) {
+    for delay_ms in [40_u64, 120, 280, 520] {
+        let weak = weak.clone();
+        let bufs = bufs.clone();
+        let tab_id = tab_id.clone();
+        slint::Timer::single_shot(std::time::Duration::from_millis(delay_ms), move || {
+            let Some(win) = weak.upgrade() else { return };
+            rebuild_tab_display(&win, &bufs, &tab_id);
+            win.window().request_redraw();
+        });
+    }
+}
+
 /// Build and wire one application window. Called for the first window by
 /// `run()` and for every subsequent window by the new-window entry points.
 /// `at` pins the window to a physical screen position (tab detach); without
@@ -518,6 +539,130 @@ pub(super) fn open_window(
 
     wire_editor_window_chrome(&ctx);
     wire_pin_on_top(&ctx);
+    {
+        let main_weak = window.as_weak();
+        let proc_weak = proc_win.as_weak();
+        let sftp_handles = sftp_handles.clone();
+        let sftp_last_cwd = sftp_last_cwd.clone();
+        let session_handles = handles.clone();
+        let layout = layout.clone();
+        let content_size = content_size.clone();
+        let tabs_model = tabs_model.clone();
+        let panes_model = panes_model.clone();
+        let splitters_model = splitters_model.clone();
+        let terminals_model = terminals_model.clone();
+        let bufs = bufs.clone();
+        proc_win.on_open_in_sftp(move |tab_id: SharedString, path: SharedString| {
+            let tab_id = tab_id.to_string();
+            let path = path.trim().to_string();
+            let Some(main) = main_weak.upgrade() else {
+                return;
+            };
+            let mut has_sftp = None;
+            for i in 0..terminals_model.row_count() {
+                if let Some(row) = terminals_model.row_data(i) {
+                    if row.id.as_str() == tab_id {
+                        has_sftp = Some(row.sftp_available);
+                        break;
+                    }
+                }
+            }
+            let Some(has_sftp) = has_sftp else {
+                set_process_action_error(
+                    &proc_weak,
+                    t("当前会话不可用", "The current session is unavailable"),
+                );
+                return;
+            };
+            if !has_sftp {
+                set_process_action_error(
+                    &proc_weak,
+                    t("这个会话没有 SFTP", "This session does not have SFTP"),
+                );
+                return;
+            }
+            {
+                let mut lay = layout.borrow_mut();
+                if let Some(leaf_id) = lay.leaf_of_tab(&tab_id) {
+                    lay.focused = leaf_id;
+                    if let Some(leaf) = lay.leaf_mut(leaf_id) {
+                        leaf.active = tab_id.clone();
+                    }
+                }
+            }
+            refresh_panes(
+                &main,
+                &layout.borrow(),
+                content_size.get(),
+                &tabs_model,
+                &panes_model,
+                &splitters_model,
+            );
+            update_terminal_row(&terminals_model, &tab_id, |row| {
+                row.sftp_collapsed = false;
+            });
+            sftp_last_cwd.lock().unwrap().remove(&tab_id);
+            set_sftp_loading(&terminals_model, &tab_id, true);
+            main.set_sftp_reveal_tab(tab_id.clone().into());
+            let seq = main.get_sftp_reveal_seq().wrapping_add(1).max(1);
+            main.set_sftp_reveal_seq(seq);
+            // Same bytes as the SFTP "cd in terminal" action. The popup has
+            // already run this callback (it fires before close), so the send
+            // itself can wait until the panel resize has settled.
+            let cmd = format!("cd {}", posix_shell_quote(&path));
+            let connected = session_handles.borrow().contains_key(&tab_id);
+            let opened = match sftp_handles.lock() {
+                Ok(handles) => {
+                    if let Some(handle) = handles.get(&tab_id) {
+                        handle.list_dir(path.clone());
+                        true
+                    } else {
+                        false
+                    }
+                }
+                Err(_) => false,
+            };
+            raise_to_front(&main);
+            if !connected {
+                set_process_action_error(
+                    &proc_weak,
+                    t("终端还没连上，cd 没有发出", "The terminal is not connected, so cd was not sent"),
+                );
+                return;
+            }
+            {
+                let handles = session_handles.clone();
+                let weak = main_weak.clone();
+                let bufs = bufs.clone();
+                let tab_for_send = tab_id.clone();
+                let cmd_for_send = cmd.clone();
+                slint::Timer::single_shot(INJECTED_CD_DELAY, move || {
+                    let (_history, bytes) = encode_command_bar_input(&cmd_for_send);
+                    let sent = handles
+                        .borrow()
+                        .get(&tab_for_send)
+                        .map(|handle| handle.send_raw(bytes))
+                        .is_some();
+                    if !sent {
+                        return;
+                    }
+                    paint_terminal_after_inject(weak, bufs, tab_for_send);
+                });
+            }
+            if opened {
+                if let Some(proc_win) = proc_weak.upgrade() {
+                    proc_win.set_action_busy(false);
+                    proc_win.set_action_error(false);
+                    proc_win.set_action_status(format!("{cmd}").into());
+                }
+            } else {
+                set_process_action_error(
+                    &proc_weak,
+                    t("SFTP 还没连上", "SFTP is not connected yet"),
+                );
+            }
+        });
+    }
     {
         let proc_weak = proc_win.as_weak();
         let handles = handles.clone();

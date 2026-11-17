@@ -1994,7 +1994,7 @@ async fn run_session(
     c = comm[pid]
     if (c == "") c = "?"
     if (length(c) > 180) c = substr(c, 1, 180)
-    printf "%d %s %.1f %.1f %s\n", pid, u, cpu, mp, c
+    printf "%d %s %.1f %.1f rss:%.0f %s\n", pid, u, cpu, mp, rss, c
   }
 }
 function up(   l, a) {
@@ -3066,7 +3066,15 @@ fn parse_ps_line(line: &str) -> Option<ProcInfo> {
     let user = it.next()?.to_string();
     let cpu: f32 = it.next()?.parse().ok()?;
     let mem: f32 = it.next()?.parse().ok()?;
-    let command = it.collect::<Vec<_>>().join(" ");
+    let fifth = it.next()?;
+    let (rss_kib, command) = if let Some(kib) = fifth.strip_prefix("rss:") {
+        let rss = kib.parse::<f64>().unwrap_or(0.0).max(0.0) as u64;
+        (rss, it.collect::<Vec<_>>().join(" "))
+    } else {
+        let mut parts = vec![fifth.to_string()];
+        parts.extend(it.map(str::to_string));
+        (0, parts.join(" "))
+    };
     if command.is_empty() {
         return None;
     }
@@ -3075,6 +3083,7 @@ fn parse_ps_line(line: &str) -> Option<ProcInfo> {
         user,
         cpu,
         mem,
+        rss_kib,
         command,
     })
 }

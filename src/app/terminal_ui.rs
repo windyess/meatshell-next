@@ -261,7 +261,8 @@ pub(super) fn rebuild_tab_display(win: &AppWindow, bufs: &TermBuffers, tab_id: &
     };
     let lines = b.lines;
     let line_keys = b.line_keys;
-    let spans_model = patch_term_lines(win, tab_id, lines, &line_keys);
+    let cursor_row = b.cursor_row;
+    let spans_model = patch_term_lines(win, tab_id, lines, &line_keys, cursor_row);
     let sel_empty = sel.is_empty();
     let sm = if sel_empty {
         None
@@ -302,11 +303,17 @@ fn term_line_keys() -> &'static std::sync::Mutex<HashMap<String, Vec<u64>>> {
 }
 
 /// Keep the existing row model and replace only lines whose fingerprint changed.
+///
+/// `cursor_row` is always submitted again. The grid includes the blank rows
+/// below the prompt, so "the last rows" are not the prompt. A prompt whose
+/// first Text items were created without glyphs then matches its fingerprint
+/// and would stay blank until the next command changes that line.
 fn patch_term_lines(
     win: &AppWindow,
     tab_id: &str,
     lines: Vec<Vec<TermSpan>>,
     keys: &[u64],
+    cursor_row: i32,
 ) -> ModelRc<TermLine> {
     let existing = current_term_lines(win, tab_id);
     let mut stored = term_line_keys().lock().unwrap();
@@ -322,15 +329,23 @@ fn patch_term_lines(
         model.remove(model.row_count() - 1);
     }
     for (i, spans) in lines.into_iter().enumerate() {
-        let unchanged = i < model.row_count() && prev.get(i).copied() == keys.get(i).copied();
-        if unchanged {
+        let on_cursor = cursor_row >= 0 && (i as i32 == cursor_row || i as i32 + 1 == cursor_row);
+        let same = i < model.row_count() && prev.get(i).copied() == keys.get(i).copied();
+        if same && !on_cursor {
             continue;
         }
         let line = TermLine {
             spans: ModelRc::from(Rc::new(VecModel::from(spans))),
         };
         if i < model.row_count() {
-            model.set_row_data(i, line);
+            // Same fingerprint on the cursor line: replace the row so Slint
+            // builds new Text items. set_row_data of an equal line does not.
+            if same && on_cursor {
+                model.remove(i);
+                model.insert(i, line);
+            } else {
+                model.set_row_data(i, line);
+            }
         } else {
             model.push(line);
         }

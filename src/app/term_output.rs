@@ -337,5 +337,18 @@ pub(super) fn do_tab_render_flush(
         slint::Timer::single_shot(std::time::Duration::ZERO, move || {
             run_coalesced_tab_render(&weak2, &tid, &bufs2, gate);
         });
+    } else if visible {
+        // The stream just went idle. A prompt printed in this snapshot can
+        // miss its glyphs on the frame that created the Text items; one more
+        // pass after that frame presents the line without waiting for the
+        // next command.
+        let weak2 = weak.clone();
+        let tid = tab_id.to_string();
+        let bufs2 = bufs.clone();
+        slint::Timer::single_shot(std::time::Duration::from_millis(32), move || {
+            let Some(win) = weak2.upgrade() else { return };
+            rebuild_tab_display(&win, &bufs2, &tid);
+            win.window().request_redraw();
+        });
     }
 }

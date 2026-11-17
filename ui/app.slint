@@ -486,6 +486,9 @@ export component AppWindow inherits Window {
     // stay here as the live data source shared with that window (#23).
     callback open-processes();
     in-out property <bool> process-window-open: false;
+    // Bumped when a process row asks to reveal that tab's SFTP file list.
+    in-out property <string> sftp-reveal-tab: "";
+    in-out property <int> sftp-reveal-seq: 0;
     // Process window sort and live-refresh pause. Shared with ProcWindow so a
     // new sample keeps the column the user picked.
     in-out property <string> proc-sort-key: "cpu";
@@ -2061,6 +2064,8 @@ export component AppWindow inherits Window {
                         sftp-dock <=> root.sftp-dock;
                         sftp-collapsed: term.sftp-collapsed;
                         set-sftp-collapsed(v) => { root.set-pane-sftp-collapsed(term.id, v); }
+                        sftp-reveal-tab: root.sftp-reveal-tab;
+                        sftp-reveal-seq: root.sftp-reveal-seq;
                         sftp-saved-height: term.sftp-saved-height;
                         set-sftp-saved-height(v) => { root.set-pane-sftp-saved-height(term.id, v); }
                         sftp-tree-width: root.sftp-tree-width;

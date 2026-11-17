@@ -570,6 +570,9 @@ msgstr "Clear sort"
 msgid "Terminate process"
 msgstr "Terminate process"
 
+msgid "Open in SFTP"
+msgstr "Open in SFTP"
+
 msgid "PID copied"
 msgstr "PID copied"
 
