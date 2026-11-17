@@ -5,6 +5,26 @@ All notable changes are documented here. 本文件记录所有重要变更。
 
 ## Unreleased
 
+## [0.7.20] - 2026-11-17
+
+- **快速连接的分组可以拖动排序。** 系统分组保持置顶；其他分组按放下的位置记住顺序。单击标题仍然展开或收起。
+- **Quick Connect groups can be dragged into order.** The system group stays pinned. Other groups keep the order you drop them in. Clicking a header still expands or collapses it.
+
+- **端口转发规则可以修改。** 绑定失败时显示原因，并放开已经占用的端口。
+- **Port-forward rules can be edited.** A bind failure shows why it failed and releases the port it was holding.
+
+- **进程列表会持续刷新，可以暂停，也可以按列排序。** 内存同时显示百分比和占用大小。右键进程可在 SFTP 中打开所在目录，并让终端执行 cd。结束进程时能看到 PID 和完整命令。
+- **The process list stays live, and can be paused or sorted by column.** Memory shows a percentage and a size. Right-click a process to open its directory in SFTP and cd there in the terminal. Terminating a process names the PID and shows the full command.
+
+- **SFTP 默认按名称排序，目录在前。**
+- **SFTP lists names A to Z, with directories first.**
+
+- **命令跑完后终端会把提示符画出来。** 不再只剩一个光标，要等下一条命令才出现文字。
+- **The terminal draws the prompt when a command finishes.** The line no longer stays blank, with only a cursor, until the next command.
+
+- **Windows 上的 RDP 窗口可以随屏幕缩放。** 连接文件按系统要求写成 UTF-16，剪贴板选项会生效。
+- **The Windows RDP window can resize with the screen.** The connection file is UTF-16, so the clipboard option is applied.
+
 ## [0.7.19] - 2026-11-14
 
 - **资源监控列表尽量完整显示，版本号固定在侧栏底部。** 磁盘分区不再被限制在固定高度，剩余空间都给列表；版本号钉在最下方，与端口转发之间留出十行空白。
